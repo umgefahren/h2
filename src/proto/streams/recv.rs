@@ -1003,13 +1003,12 @@ impl Recv {
     }
 
     /// Send any pending refusals.
-    pub fn send_pending_refusal<T, B>(
+    pub fn send_pending_refusal<B>(
         &mut self,
         cx: &mut Context,
-        dst: &mut Codec<T, Prioritized<B>>,
+        dst: &mut Codec<Prioritized<B>>,
     ) -> Poll<io::Result<()>>
     where
-        T: AsyncWrite + Unpin,
         B: Buf,
     {
         if let Some(stream_id) = self.refused {
@@ -1078,15 +1077,14 @@ impl Recv {
         }
     }
 
-    pub fn poll_complete<T, B>(
+    pub fn poll_complete<B>(
         &mut self,
         cx: &mut Context,
         store: &mut Store,
         counts: &mut Counts,
-        dst: &mut Codec<T, Prioritized<B>>,
+        dst: &mut Codec<Prioritized<B>>,
     ) -> Poll<io::Result<()>>
     where
-        T: AsyncWrite + Unpin,
         B: Buf,
     {
         // Send any pending connection level window updates
@@ -1099,13 +1097,12 @@ impl Recv {
     }
 
     /// Send connection level window update
-    fn send_connection_window_update<T, B>(
+    fn send_connection_window_update<B>(
         &mut self,
         cx: &mut Context,
-        dst: &mut Codec<T, Prioritized<B>>,
+        dst: &mut Codec<Prioritized<B>>,
     ) -> Poll<io::Result<()>>
     where
-        T: AsyncWrite + Unpin,
         B: Buf,
     {
         if let Some(incr) = self.flow.unclaimed_capacity() {
@@ -1128,15 +1125,14 @@ impl Recv {
     }
 
     /// Send stream level window update
-    pub fn send_stream_window_updates<T, B>(
+    pub fn send_stream_window_updates<B>(
         &mut self,
         cx: &mut Context,
         store: &mut Store,
         counts: &mut Counts,
-        dst: &mut Codec<T, Prioritized<B>>,
+        dst: &mut Codec<Prioritized<B>>,
     ) -> Poll<io::Result<()>>
     where
-        T: AsyncWrite + Unpin,
         B: Buf,
     {
         loop {

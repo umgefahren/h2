@@ -38,14 +38,13 @@ impl Settings {
         }
     }
 
-    pub(crate) fn recv_settings<T, B, C, P>(
+    pub(crate) fn recv_settings<B, C, P>(
         &mut self,
         frame: frame::Settings,
-        codec: &mut Codec<T, B>,
+        codec: &mut Codec<B>,
         streams: &mut Streams<C, P>,
     ) -> Result<(), Error>
     where
-        T: AsyncWrite + Unpin,
         B: Buf,
         C: Buf,
         P: Peer,
@@ -108,14 +107,13 @@ impl Settings {
         !has_received
     }
 
-    pub(crate) fn poll_send<T, B, C, P>(
+    pub(crate) fn poll_send<B, C, P>(
         &mut self,
         cx: &mut Context,
-        dst: &mut Codec<T, B>,
+        dst: &mut Codec<B>,
         streams: &mut Streams<C, P>,
     ) -> Poll<Result<(), Error>>
     where
-        T: AsyncWrite + Unpin,
         B: Buf,
         C: Buf,
         P: Peer,

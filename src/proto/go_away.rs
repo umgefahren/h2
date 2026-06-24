@@ -4,7 +4,6 @@ use crate::frame::{self, Reason, StreamId};
 use bytes::Buf;
 use std::io;
 use std::task::{Context, Poll};
-use tokio::io::AsyncWrite;
 
 /// Manages our sending of GOAWAY frames.
 #[derive(Debug)]
@@ -117,13 +116,12 @@ impl GoAway {
     /// Try to write a pending GOAWAY frame to the buffer.
     ///
     /// If a frame is written, the `Reason` of the GOAWAY is returned.
-    pub fn send_pending_go_away<T, B>(
+    pub fn send_pending_go_away<B>(
         &mut self,
         cx: &mut Context,
-        dst: &mut Codec<T, B>,
+        dst: &mut Codec<B>,
     ) -> Poll<Option<io::Result<Reason>>>
     where
-        T: AsyncWrite + Unpin,
         B: Buf,
     {
         if let Some(frame) = self.pending.take() {

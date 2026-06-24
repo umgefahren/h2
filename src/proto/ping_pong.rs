@@ -8,7 +8,6 @@ use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tokio::io::AsyncWrite;
 
 /// Acknowledges ping requests from the remote.
 #[derive(Debug)]
@@ -135,13 +134,12 @@ impl PingPong {
     }
 
     /// Send any pending pongs.
-    pub(crate) fn send_pending_pong<T, B>(
+    pub(crate) fn send_pending_pong<B>(
         &mut self,
         cx: &mut Context,
-        dst: &mut Codec<T, B>,
+        dst: &mut Codec<B>,
     ) -> Poll<io::Result<()>>
     where
-        T: AsyncWrite + Unpin,
         B: Buf,
     {
         if let Some(pong) = self.pending_pong.take() {
@@ -158,13 +156,12 @@ impl PingPong {
     }
 
     /// Send any pending pings.
-    pub(crate) fn send_pending_ping<T, B>(
+    pub(crate) fn send_pending_ping<B>(
         &mut self,
         cx: &mut Context,
-        dst: &mut Codec<T, B>,
+        dst: &mut Codec<B>,
     ) -> Poll<io::Result<()>>
     where
-        T: AsyncWrite + Unpin,
         B: Buf,
     {
         if let Some(ref mut ping) = self.pending_ping {

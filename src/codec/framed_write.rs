@@ -4,12 +4,8 @@ use crate::frame::{self, Frame, FrameSize};
 use crate::hpack;
 
 use bytes::{Buf, BufMut, BytesMut};
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio_util::io::poll_write_buf;
 
-use std::io::{self, Cursor};
+use std::io::Cursor;
 
 // A macro to get around a method needing to borrow &mut self
 macro_rules! limited_write_buf {
@@ -19,12 +15,13 @@ macro_rules! limited_write_buf {
     }};
 }
 
+/// Encodes HTTP/2 frames into an in-memory byte buffer.
+///
+/// This type is fully sans-I/O: frames are buffered with [`FramedWrite::buffer`]
+/// and the encoded bytes are drained into a caller-provided buffer with
+/// [`FramedWrite::flush_into`]. There is no underlying socket.
 #[derive(Debug)]
-pub struct FramedWrite<T, B> {
-    /// Upstream `AsyncWrite`
-    inner: T,
-    final_flush_done: bool,
-
+pub struct FramedWrite<B> {
     encoder: Encoder<B>,
 }
 
@@ -66,31 +63,19 @@ enum Next<B> {
 /// frame that big.
 const DEFAULT_BUFFER_CAPACITY: usize = 16 * 1_024;
 
-/// Chain payloads bigger than this when vectored I/O is enabled. The remote
-/// will never advertise a max frame size less than this (well, the spec says
-/// the max frame size can't be less than 16kb, so not even close).
-const CHAIN_THRESHOLD: usize = 256;
+/// Chain payloads bigger than this. Since the sans-I/O encoder always copies
+/// payloads into a contiguous output buffer (no vectored I/O), use a larger
+/// value to reduce the number of small and fragmented copies and improve
+/// throughput.
+const CHAIN_THRESHOLD: usize = 1024;
 
-/// Chain payloads bigger than this when vectored I/O is **not** enabled.
-/// A larger value in this scenario will reduce the number of small and
-/// fragmented data being sent, and hereby improve the throughput.
-const CHAIN_THRESHOLD_WITHOUT_VECTORED_IO: usize = 1024;
-
-// TODO: Make generic
-impl<T, B> FramedWrite<T, B>
+impl<B> FramedWrite<B>
 where
-    T: AsyncWrite + Unpin,
     B: Buf,
 {
-    pub fn new(inner: T) -> FramedWrite<T, B> {
-        let chain_threshold = if inner.is_write_vectored() {
-            CHAIN_THRESHOLD
-        } else {
-            CHAIN_THRESHOLD_WITHOUT_VECTORED_IO
-        };
+    pub fn new() -> FramedWrite<B> {
+        let chain_threshold = CHAIN_THRESHOLD;
         FramedWrite {
-            inner,
-            final_flush_done: false,
             encoder: Encoder {
                 hpack: hpack::Encoder::default(),
                 buf: Cursor::new(BytesMut::with_capacity(DEFAULT_BUFFER_CAPACITY)),
@@ -103,34 +88,29 @@ where
         }
     }
 
-    /// Returns `Ready` when `send` is able to accept a frame
-    ///
-    /// Calling this function may result in the current contents of the buffer
-    /// to be flushed to `T`.
-    pub fn poll_ready(&mut self, cx: &mut Context) -> Poll<io::Result<()>> {
-        if !self.encoder.has_capacity() {
-            // Try flushing
-            ready!(self.flush(cx))?;
+    /// Returns `true` when `buffer` is able to accept a frame.
+    pub fn has_capacity(&self) -> bool {
+        self.encoder.has_capacity()
+    }
 
-            if !self.encoder.has_capacity() {
-                return Poll::Pending;
-            }
-        }
-
-        Poll::Ready(Ok(()))
+    /// Returns `true` when there is buffered or pending frame data that has not
+    /// yet been drained by `flush_into`.
+    pub fn has_pending(&self) -> bool {
+        !self.encoder.is_empty() || self.encoder.next.is_some()
     }
 
     /// Buffer a frame.
     ///
-    /// `poll_ready` must be called first to ensure that a frame may be
+    /// `has_capacity` must return `true` first to ensure that a frame may be
     /// accepted.
     pub fn buffer(&mut self, item: Frame<B>) -> Result<(), UserError> {
         self.encoder.buffer(item)
     }
 
-    /// Flush buffered data to the wire
-    pub fn flush(&mut self, cx: &mut Context) -> Poll<io::Result<()>> {
-        let span = tracing::trace_span!("FramedWrite::flush");
+    /// Drain all buffered (and pending continuation/data) frame bytes into
+    /// `dst`. This always succeeds since it writes to memory.
+    pub fn flush_into(&mut self, dst: &mut BytesMut) {
+        let span = tracing::trace_span!("FramedWrite::flush_into");
         let _e = span.enter();
 
         loop {
@@ -138,18 +118,15 @@ where
                 match self.encoder.next {
                     Some(Next::Data(ref mut frame)) => {
                         tracing::trace!(queued_data_frame = true);
-                        let mut buf = (&mut self.encoder.buf).chain(frame.payload_mut());
-                        ready!(poll_write_buf(Pin::new(&mut self.inner), cx, &mut buf))?
+                        // Header (and any chained prefix) followed by the
+                        // remaining payload.
+                        dst.put((&mut self.encoder.buf).chain(frame.payload_mut()));
                     }
                     _ => {
                         tracing::trace!(queued_data_frame = false);
-                        ready!(poll_write_buf(
-                            Pin::new(&mut self.inner),
-                            cx,
-                            &mut self.encoder.buf
-                        ))?
+                        dst.put(&mut self.encoder.buf);
                     }
-                };
+                }
             }
 
             match self.encoder.unset_frame() {
@@ -157,21 +134,6 @@ where
                 ControlFlow::Break => break,
             }
         }
-
-        tracing::trace!("flushing buffer");
-        // Flush the upstream
-        ready!(Pin::new(&mut self.inner).poll_flush(cx))?;
-
-        Poll::Ready(Ok(()))
-    }
-
-    /// Close the codec
-    pub fn shutdown(&mut self, cx: &mut Context) -> Poll<io::Result<()>> {
-        if !self.final_flush_done {
-            ready!(self.flush(cx))?;
-            self.final_flush_done = true;
-        }
-        Pin::new(&mut self.inner).poll_shutdown(cx)
     }
 }
 
@@ -315,7 +277,7 @@ impl<B> Encoder<B> {
     }
 }
 
-impl<T, B> FramedWrite<T, B> {
+impl<B> FramedWrite<B> {
     /// Returns the max frame size that can be sent
     pub fn max_frame_size(&self) -> usize {
         self.encoder.max_frame_size()
@@ -335,33 +297,5 @@ impl<T, B> FramedWrite<T, B> {
     /// Retrieve the last data frame that has been sent
     pub fn take_last_data_frame(&mut self) -> Option<frame::Data<B>> {
         self.encoder.last_data_frame.take()
-    }
-
-    pub fn get_mut(&mut self) -> &mut T {
-        &mut self.inner
-    }
-}
-
-impl<T: AsyncRead + Unpin, B> AsyncRead for FramedWrite<T, B> {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf,
-    ) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.inner).poll_read(cx, buf)
-    }
-}
-
-// We never project the Pin to `B`.
-impl<T: Unpin, B> Unpin for FramedWrite<T, B> {}
-
-#[cfg(feature = "unstable")]
-mod unstable {
-    use super::*;
-
-    impl<T, B> FramedWrite<T, B> {
-        pub fn get_ref(&self) -> &T {
-            &self.inner
-        }
     }
 }

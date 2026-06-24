@@ -505,16 +505,15 @@ impl Prioritize {
         }
     }
 
-    pub fn poll_complete<T, B>(
+    pub fn poll_complete<B>(
         &mut self,
         cx: &mut Context,
         buffer: &mut Buffer<Frame<B>>,
         store: &mut Store,
         counts: &mut Counts,
-        dst: &mut Codec<T, Prioritized<B>>,
+        dst: &mut Codec<Prioritized<B>>,
     ) -> Poll<io::Result<()>>
     where
-        T: AsyncWrite + Unpin,
         B: Buf,
     {
         // Ensure codec is ready
@@ -573,11 +572,11 @@ impl Prioritize {
     /// When a data frame is written to the codec, it may not be written in its
     /// entirety (large chunks are split up into potentially many data frames).
     /// In this case, the stream needs to be reprioritized.
-    fn reclaim_frame<T, B>(
+    fn reclaim_frame<B>(
         &mut self,
         buffer: &mut Buffer<Frame<B>>,
         store: &mut Store,
-        dst: &mut Codec<T, Prioritized<B>>,
+        dst: &mut Codec<Prioritized<B>>,
     ) -> bool
     where
         B: Buf,

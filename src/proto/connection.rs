@@ -5,23 +5,20 @@ use crate::{client, server};
 use crate::frame::DEFAULT_INITIAL_WINDOW_SIZE;
 use crate::proto::*;
 
-use bytes::Bytes;
-use futures_core::Stream;
+use bytes::{Bytes, BytesMut};
 use std::io;
 use std::marker::PhantomData;
-use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use tokio::io::AsyncRead;
 
 /// An H2 connection
 #[derive(Debug)]
-pub(crate) struct Connection<T, P, B: Buf = Bytes>
+pub(crate) struct Connection<P, B: Buf = Bytes>
 where
     P: Peer,
 {
     /// Read / write frame values
-    codec: Codec<T, Prioritized<B>>,
+    codec: Codec<Prioritized<B>>,
 
     inner: ConnectionInner<P, B>,
 }
@@ -97,13 +94,12 @@ enum State {
     Closed(Reason, Initiator),
 }
 
-impl<T, P, B> Connection<T, P, B>
+impl<P, B> Connection<P, B>
 where
-    T: AsyncRead + AsyncWrite + Unpin,
     P: Peer,
     B: Buf,
 {
-    pub fn new(codec: Codec<T, Prioritized<B>>, config: Config) -> Connection<T, P, B> {
+    pub fn new(codec: Codec<Prioritized<B>>, config: Config) -> Connection<P, B> {
         fn streams_config(config: &Config) -> streams::Config {
             streams::Config {
                 initial_max_send_streams: config.initial_max_send_streams,
@@ -141,6 +137,17 @@ where
                 _phantom: PhantomData,
             },
         }
+    }
+
+    /// Feed bytes received from the peer into the frame decoder.
+    pub(crate) fn recv_bytes(&mut self, src: &[u8]) {
+        self.codec.recv(src);
+    }
+
+    /// Drain any encoded wire bytes that are ready to send into `dst`,
+    /// returning the number of bytes written.
+    pub(crate) fn poll_transmit(&mut self, dst: &mut BytesMut) -> usize {
+        self.codec.flush_into(dst)
     }
 
     /// connection flow control
@@ -349,7 +356,7 @@ where
             match self
                 .inner
                 .as_dyn()
-                .recv_frame(ready!(Pin::new(&mut self.codec).poll_next(cx)?))?
+                .recv_frame(ready!(self.codec.poll_next(cx)?))?
             {
                 ReceivedFrame::Settings(frame) => {
                     self.inner.settings.recv_settings(
@@ -584,9 +591,8 @@ enum ReceivedFrame {
     Done,
 }
 
-impl<T, B> Connection<T, client::Peer, B>
+impl<B> Connection<client::Peer, B>
 where
-    T: AsyncRead + AsyncWrite,
     B: Buf,
 {
     pub(crate) fn streams(&self) -> &Streams<B, client::Peer> {
@@ -594,9 +600,8 @@ where
     }
 }
 
-impl<T, B> Connection<T, server::Peer, B>
+impl<B> Connection<server::Peer, B>
 where
-    T: AsyncRead + AsyncWrite + Unpin,
     B: Buf,
 {
     pub fn next_incoming(&mut self) -> Option<StreamRef<B>> {
@@ -629,7 +634,7 @@ where
     }
 }
 
-impl<T, P, B> Drop for Connection<T, P, B>
+impl<P, B> Drop for Connection<P, B>
 where
     P: Peer,
     B: Buf,

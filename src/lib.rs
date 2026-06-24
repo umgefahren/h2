@@ -1,9 +1,20 @@
-//! An asynchronous, HTTP/2 server and client implementation.
+//! A sans-I/O HTTP/2 server and client implementation.
 //!
-//! This library implements the [HTTP/2] specification. The implementation is
-//! asynchronous, using [futures] as the basis for the API. The implementation
-//! is also decoupled from TCP or TLS details. The user must handle ALPN and
-//! HTTP/1.1 upgrades themselves.
+//! This library implements the [HTTP/2] specification as a pure state machine.
+//! It performs **no** I/O and contains **no** cryptography: the caller owns the
+//! transport (a plain socket, a kTLS socket, an in-memory pipe, ...) and is
+//! responsible for ALPN, TLS, and HTTP/1.1 upgrades.
+//!
+//! A connection is driven through three primitives:
+//!
+//! * `recv(&[u8])` feeds bytes received from the peer into the state machine.
+//! * `poll_transmit(&mut BytesMut)` drains bytes that must be written to the
+//!   peer.
+//! * `poll_event()` pulls the next protocol event (a request/response, a chunk
+//!   of body data, trailers, a reset, ...).
+//!
+//! See the [`client`] and [`server`] modules for the respective connection
+//! types, and [`SendStream`] for streaming request/response bodies.
 //!
 //! # Getting started
 //!
@@ -85,6 +96,10 @@
     clippy::undocumented_unsafe_blocks
 )]
 #![allow(clippy::type_complexity, clippy::manual_range_contains)]
+// The sans-I/O rewrite retains internal protocol machinery (push promises,
+// informational responses, user pings, ...) that is not yet surfaced by the
+// event-based public API. Keep it around rather than deleting working code.
+#![allow(dead_code)]
 #![cfg_attr(test, deny(warnings))]
 
 macro_rules! proto_err {
@@ -142,6 +157,7 @@ pub use codec::{Codec, SendError, UserError};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::task::{RawWaker, RawWakerVTable, Waker};
 
 /// Creates a future from a function that returns `Poll`.
 fn poll_fn<T, F: FnMut(&mut Context<'_>) -> T>(f: F) -> PollFn<F> {
@@ -159,4 +175,20 @@ impl<T, F: FnMut(&mut Context<'_>) -> Poll<T>> Future for PollFn<F> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         (self.0)(cx)
     }
+}
+
+/// Returns a `Waker` that does nothing when woken.
+///
+/// The sans-I/O state machine is driven synchronously: callers feed bytes in,
+/// pull bytes out, and pull protocol events out. Internally the protocol logic
+/// is still structured around `Poll`, so we hand it a waker that never needs to
+/// schedule anything — `Poll::Pending` simply means "no further progress can be
+/// made until more input arrives".
+fn noop_waker() -> Waker {
+    const VTABLE: RawWakerVTable =
+        RawWakerVTable::new(|_| RAW, |_| {}, |_| {}, |_| {});
+    const RAW: RawWaker = RawWaker::new(std::ptr::null(), &VTABLE);
+    // SAFETY: the vtable functions are all no-ops that ignore the (null) data
+    // pointer, so the resulting `Waker` is sound to use and clone.
+    unsafe { Waker::from_raw(RAW) }
 }

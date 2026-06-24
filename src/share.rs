@@ -389,6 +389,10 @@ impl StreamId {
         StreamId(id.into())
     }
 
+    pub(crate) fn from_u32(id: u32) -> Self {
+        StreamId(id)
+    }
+
     /// Returns the `u32` corresponding to this `StreamId`
     ///
     /// # Note

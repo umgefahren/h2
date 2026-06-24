@@ -10,7 +10,6 @@ use crate::{client, proto, server};
 use bytes::{Buf, Bytes};
 use http::{HeaderMap, Request, Response};
 use std::task::{Context, Poll, Waker};
-use tokio::io::AsyncWrite;
 
 use std::sync::{Arc, Mutex};
 use std::{fmt, io};
@@ -153,13 +152,11 @@ where
         })
     }
 
-    pub fn send_pending_refusal<T>(
+    pub fn send_pending_refusal(
         &mut self,
         cx: &mut Context,
-        dst: &mut Codec<T, Prioritized<B>>,
+        dst: &mut Codec<Prioritized<B>>,
     ) -> Poll<io::Result<()>>
-    where
-        T: AsyncWrite + Unpin,
     {
         let mut me = self.inner.lock().unwrap();
         let me = &mut *me;
@@ -174,13 +171,11 @@ where
             .clear_expired_reset_streams(&mut me.store, &mut me.counts);
     }
 
-    pub fn poll_complete<T>(
+    pub fn poll_complete(
         &mut self,
         cx: &mut Context,
-        dst: &mut Codec<T, Prioritized<B>>,
+        dst: &mut Codec<Prioritized<B>>,
     ) -> Poll<io::Result<()>>
-    where
-        T: AsyncWrite + Unpin,
     {
         let mut me = self.inner.lock().unwrap();
         me.poll_complete(&self.send_buffer, cx, dst)
@@ -902,14 +897,13 @@ impl Inner {
         Ok(())
     }
 
-    fn poll_complete<T, B>(
+    fn poll_complete<B>(
         &mut self,
         send_buffer: &SendBuffer<B>,
         cx: &mut Context,
-        dst: &mut Codec<T, Prioritized<B>>,
+        dst: &mut Codec<Prioritized<B>>,
     ) -> Poll<io::Result<()>>
     where
-        T: AsyncWrite + Unpin,
         B: Buf,
     {
         let mut send_buffer = send_buffer.inner.lock().unwrap();

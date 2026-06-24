@@ -7,7 +7,6 @@ use crate::frame::{self, Reason};
 use crate::proto::{self, Error, Initiator};
 
 use bytes::Buf;
-use tokio::io::AsyncWrite;
 
 use std::cmp::Ordering;
 use std::io;
@@ -334,16 +333,15 @@ impl Send {
         Ok(())
     }
 
-    pub fn poll_complete<T, B>(
+    pub fn poll_complete<B>(
         &mut self,
         cx: &mut Context,
         buffer: &mut Buffer<Frame<B>>,
         store: &mut Store,
         counts: &mut Counts,
-        dst: &mut Codec<T, Prioritized<B>>,
+        dst: &mut Codec<Prioritized<B>>,
     ) -> Poll<io::Result<()>>
     where
-        T: AsyncWrite + Unpin,
         B: Buf,
     {
         self.prioritize

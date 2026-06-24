@@ -15,7 +15,6 @@ const MAX_CHUNK: usize = 2 * 1024;
 
 #[test]
 fn hpack_fuzz() {
-    let _ = env_logger::try_init();
     fn prop(fuzz: FuzzHpack) -> TestResult {
         fuzz.run();
         TestResult::from_bool(true)
@@ -30,7 +29,6 @@ fn hpack_fuzz() {
 // If wanting to test with a specific feed, uncomment and fill in the seed.
 #[test]
 fn hpack_fuzz_seeded() {
-    let _ = env_logger::try_init();
     let seed = [/* fill me in*/];
     FuzzHpack::new(seed).run();
 }

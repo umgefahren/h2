@@ -9,12 +9,12 @@ authors = [
   "Carl Lerche <me@carllerche.com>",
   "Sean McArthur <sean@seanmonstar.com>",
 ]
-description = "An HTTP/2 client and server"
+description = "A sans-I/O HTTP/2 client and server"
 documentation = "https://docs.rs/h2"
 repository = "https://github.com/hyperium/h2"
 readme = "README.md"
-keywords = ["http", "async", "non-blocking"]
-categories = ["asynchronous", "web-programming", "network-programming"]
+keywords = ["http", "sans-io", "non-blocking"]
+categories = ["network-programming", "web-programming"]
 exclude = ["fixtures/**", "ci/**"]
 edition = "2021"
 rust-version = "1.63"
@@ -31,9 +31,6 @@ unstable = []
 
 [workspace]
 members = [
-    "tests/h2-fuzz",
-    "tests/h2-tests",
-    "tests/h2-support",
     "util/genfixture",
     "util/genhuff",
 ]
@@ -41,9 +38,6 @@ members = [
 [dependencies]
 atomic-waker = "1.0.0"
 futures-core = { version = "0.3", default-features = false }
-futures-sink = { version = "0.3", default-features = false }
-tokio-util = { version = "0.7.1", features = ["codec", "io"] }
-tokio = { version = "1", features = ["io-util"] }
 bytes = "1"
 http = "1.1"
 tracing = { version = "0.1.35", default-features = false, features = ["std"] }
@@ -63,16 +57,8 @@ walkdir = "2.3.2"
 serde = "1.0.0"
 serde_json = "1.0.0"
 
-# Examples
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "net"] }
-env_logger = { version = "0.10", default-features = false }
-
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
 
 [package.metadata.docs.rs]
 features = ["stream"]
-
-[[bench]]
-name = "main"
-harness = false

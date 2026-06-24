@@ -5,7 +5,7 @@
 
 use bytes::{Bytes, BytesMut};
 use h2::{client, server};
-use http::{Request, Response};
+use http::{HeaderMap, Request, Response};
 
 /// Pump all currently-available bytes from `from` into `to`, returning the
 /// number of bytes transferred.
@@ -19,6 +19,17 @@ macro_rules! pump {
         }
         n
     }};
+}
+
+/// Shuttle bytes between a client and server until neither has more to send.
+fn settle(client: &mut client::Connection, server: &mut server::Connection) {
+    for _ in 0..16 {
+        let c = pump!(client => server);
+        let s = pump!(server => client);
+        if c == 0 && s == 0 {
+            break;
+        }
+    }
 }
 
 #[test]
@@ -151,4 +162,155 @@ fn request_and_response_with_body() {
     assert_eq!(client_status, Some(http::StatusCode::OK));
     assert_eq!(&client_body, b"pong");
     let _ = cid;
+}
+
+#[test]
+fn request_headers_round_trip() {
+    let mut client = client::handshake();
+    let mut server = server::handshake();
+
+    let request = Request::get("https://example.com/resource")
+        .header("x-custom", "value-123")
+        .header("accept", "text/plain")
+        .body(())
+        .unwrap();
+    client.send_request(request, true).unwrap();
+
+    settle(&mut client, &mut server);
+
+    let mut got = None;
+    while let Some(ev) = server.poll_event() {
+        if let server::Event::Request { request, .. } = ev {
+            got = Some(request);
+        }
+    }
+    let request = got.expect("server did not receive request");
+    assert_eq!(request.headers().get("x-custom").unwrap(), "value-123");
+    assert_eq!(request.headers().get("accept").unwrap(), "text/plain");
+    assert_eq!(request.uri().path(), "/resource");
+}
+
+#[test]
+fn response_with_trailers() {
+    let mut client = client::handshake();
+    let mut server = server::handshake();
+
+    client
+        .send_request(Request::get("https://example.com/").body(()).unwrap(), true)
+        .unwrap();
+    settle(&mut client, &mut server);
+
+    let mut server_stream = None;
+    while let Some(ev) = server.poll_event() {
+        if let server::Event::Request { stream_id, .. } = ev {
+            server_stream = Some(stream_id);
+        }
+    }
+    let server_stream = server_stream.unwrap();
+
+    server
+        .send_response(server_stream, Response::builder().status(200).body(()).unwrap(), false)
+        .unwrap();
+    server
+        .send_data(server_stream, Bytes::from_static(b"chunk"), false)
+        .unwrap();
+    let mut trailers = HeaderMap::new();
+    trailers.insert("grpc-status", "0".parse().unwrap());
+    server.send_trailers(server_stream, trailers).unwrap();
+
+    settle(&mut client, &mut server);
+
+    let mut body = Vec::new();
+    let mut got_trailers = None;
+    while let Some(ev) = client.poll_event() {
+        match ev {
+            client::Event::Data { data, .. } => body.extend_from_slice(&data),
+            client::Event::Trailers { trailers, .. } => got_trailers = Some(trailers),
+            _ => {}
+        }
+    }
+    assert_eq!(&body, b"chunk");
+    let trailers = got_trailers.expect("client did not receive trailers");
+    assert_eq!(trailers.get("grpc-status").unwrap(), "0");
+}
+
+#[test]
+fn server_resets_stream() {
+    let mut client = client::handshake();
+    let mut server = server::handshake();
+
+    // Open a stream but leave it half-open (no end_stream) awaiting a response.
+    client
+        .send_request(Request::get("https://example.com/").body(()).unwrap(), false)
+        .unwrap();
+    settle(&mut client, &mut server);
+
+    let mut server_stream = None;
+    while let Some(ev) = server.poll_event() {
+        if let server::Event::Request { stream_id, .. } = ev {
+            server_stream = Some(stream_id);
+        }
+    }
+    let server_stream = server_stream.unwrap();
+
+    // Server refuses the request.
+    server.reset_stream(server_stream, h2::Reason::REFUSED_STREAM);
+    settle(&mut client, &mut server);
+
+    let mut reset_reason = None;
+    while let Some(ev) = client.poll_event() {
+        if let client::Event::Reset { reason, .. } = ev {
+            reset_reason = Some(reason);
+        }
+    }
+    assert_eq!(reset_reason, Some(h2::Reason::REFUSED_STREAM));
+}
+
+#[test]
+fn multiple_concurrent_streams() {
+    let mut client = client::handshake();
+    let mut server = server::handshake();
+
+    let (id_a, _) = client
+        .send_request(Request::get("https://example.com/a").body(()).unwrap(), true)
+        .unwrap();
+    let (id_b, _) = client
+        .send_request(Request::get("https://example.com/b").body(()).unwrap(), true)
+        .unwrap();
+    assert_ne!(id_a.as_u32(), id_b.as_u32());
+
+    settle(&mut client, &mut server);
+
+    // Server should observe two distinct requests; respond to each.
+    let mut paths = Vec::new();
+    let mut server_streams = Vec::new();
+    while let Some(ev) = server.poll_event() {
+        if let server::Event::Request {
+            stream_id, request, ..
+        } = ev
+        {
+            paths.push(request.uri().path().to_string());
+            server_streams.push(stream_id);
+        }
+    }
+    assert_eq!(server_streams.len(), 2);
+    paths.sort();
+    assert_eq!(paths, vec!["/a".to_string(), "/b".to_string()]);
+
+    for s in server_streams {
+        server
+            .send_response(s, Response::builder().status(204).body(()).unwrap(), true)
+            .unwrap();
+    }
+
+    settle(&mut client, &mut server);
+
+    let mut responses = 0;
+    while let Some(ev) = client.poll_event() {
+        if let client::Event::Response { response, .. } = ev {
+            assert_eq!(response.status(), 204);
+            responses += 1;
+        }
+    }
+    assert_eq!(responses, 2);
 }

@@ -29,9 +29,7 @@ fn main() {
     let mut server = server::handshake();
 
     // ---- Client initiates a request with a body --------------------------
-    let request = Request::post("https://example.com/echo")
-        .body(())
-        .unwrap();
+    let request = Request::post("https://example.com/echo").body(()).unwrap();
     let (stream_id, mut body) = client.send_request(request, false).unwrap();
     body.send_data(Bytes::from_static(b"hello, server"), true)
         .unwrap();

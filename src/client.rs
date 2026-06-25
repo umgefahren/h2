@@ -511,7 +511,8 @@ where
     B: Buf,
 {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        fmt.debug_struct("client::Connection").finish_non_exhaustive()
+        fmt.debug_struct("client::Connection")
+            .finish_non_exhaustive()
     }
 }
 

@@ -38,9 +38,7 @@ fn get_request_no_body() {
     let mut server = server::handshake();
 
     // Client sends a simple GET with no body.
-    let request = Request::get("https://example.com/")
-        .body(())
-        .unwrap();
+    let request = Request::get("https://example.com/").body(()).unwrap();
     let (_id, _body) = client.send_request(request, true).unwrap();
 
     // Exchange bytes until both sides settle.
@@ -68,9 +66,7 @@ fn get_request_no_body() {
 
     // Server responds 200, no body.
     let response = Response::builder().status(200).body(()).unwrap();
-    server
-        .send_response(server_stream, response, true)
-        .unwrap();
+    server.send_response(server_stream, response, true).unwrap();
 
     for _ in 0..8 {
         pump!(server => client);
@@ -99,9 +95,7 @@ fn request_and_response_with_body() {
     let mut client = client::Builder::new().handshake::<Bytes>();
     let mut server = server::Builder::new().handshake::<Bytes>();
 
-    let request = Request::post("https://example.com/echo")
-        .body(())
-        .unwrap();
+    let request = Request::post("https://example.com/echo").body(()).unwrap();
     let (cid, mut send_body) = client.send_request(request, false).unwrap();
     send_body
         .send_data(Bytes::from_static(b"ping"), true)
@@ -139,7 +133,9 @@ fn request_and_response_with_body() {
 
     // Server replies with a body.
     let response = Response::builder().status(200).body(()).unwrap();
-    server.send_response(server_stream, response, false).unwrap();
+    server
+        .send_response(server_stream, response, false)
+        .unwrap();
     server
         .send_data(server_stream, Bytes::from_static(b"pong"), true)
         .unwrap();
@@ -209,7 +205,11 @@ fn response_with_trailers() {
     let server_stream = server_stream.unwrap();
 
     server
-        .send_response(server_stream, Response::builder().status(200).body(()).unwrap(), false)
+        .send_response(
+            server_stream,
+            Response::builder().status(200).body(()).unwrap(),
+            false,
+        )
         .unwrap();
     server
         .send_data(server_stream, Bytes::from_static(b"chunk"), false)
@@ -241,7 +241,10 @@ fn server_resets_stream() {
 
     // Open a stream but leave it half-open (no end_stream) awaiting a response.
     client
-        .send_request(Request::get("https://example.com/").body(()).unwrap(), false)
+        .send_request(
+            Request::get("https://example.com/").body(()).unwrap(),
+            false,
+        )
         .unwrap();
     settle(&mut client, &mut server);
 
@@ -272,10 +275,16 @@ fn multiple_concurrent_streams() {
     let mut server = server::handshake();
 
     let (id_a, _) = client
-        .send_request(Request::get("https://example.com/a").body(()).unwrap(), true)
+        .send_request(
+            Request::get("https://example.com/a").body(()).unwrap(),
+            true,
+        )
         .unwrap();
     let (id_b, _) = client
-        .send_request(Request::get("https://example.com/b").body(()).unwrap(), true)
+        .send_request(
+            Request::get("https://example.com/b").body(()).unwrap(),
+            true,
+        )
         .unwrap();
     assert_ne!(id_a.as_u32(), id_b.as_u32());
 

@@ -171,8 +171,7 @@ impl<T, F: FnMut(&mut Context<'_>) -> Poll<T>> Future for PollFn<F> {
 /// schedule anything — `Poll::Pending` simply means "no further progress can be
 /// made until more input arrives".
 fn noop_waker() -> Waker {
-    const VTABLE: RawWakerVTable =
-        RawWakerVTable::new(|_| RAW, |_| {}, |_| {}, |_| {});
+    const VTABLE: RawWakerVTable = RawWakerVTable::new(|_| RAW, |_| {}, |_| {}, |_| {});
     const RAW: RawWaker = RawWaker::new(std::ptr::null(), &VTABLE);
     // SAFETY: the vtable functions are all no-ops that ignore the (null) data
     // pointer, so the resulting `Waker` is sound to use and clone.

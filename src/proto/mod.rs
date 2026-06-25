@@ -23,7 +23,6 @@ use crate::frame::{self, Frame};
 
 use bytes::Buf;
 
-
 pub type PingPayload = [u8; 8];
 
 pub type WindowSize = u32;

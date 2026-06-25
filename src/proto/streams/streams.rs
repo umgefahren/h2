@@ -156,8 +156,7 @@ where
         &mut self,
         cx: &mut Context,
         dst: &mut Codec<Prioritized<B>>,
-    ) -> Poll<io::Result<()>>
-    {
+    ) -> Poll<io::Result<()>> {
         let mut me = self.inner.lock().unwrap();
         let me = &mut *me;
         me.actions.recv.send_pending_refusal(cx, dst)
@@ -175,8 +174,7 @@ where
         &mut self,
         cx: &mut Context,
         dst: &mut Codec<Prioritized<B>>,
-    ) -> Poll<io::Result<()>>
-    {
+    ) -> Poll<io::Result<()>> {
         let mut me = self.inner.lock().unwrap();
         me.poll_complete(&self.send_buffer, cx, dst)
     }

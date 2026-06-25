@@ -34,58 +34,44 @@
 //!
 //! # Handshake
 //!
-//! Both the client and the server require a connection to already be in a state
-//! ready to start the HTTP/2 handshake. This library does not provide
-//! facilities to do this.
+//! This library assumes the transport is already in a state ready to start the
+//! HTTP/2 handshake; reaching that state (a plaintext connection with prior
+//! knowledge, a TLS connection negotiated via ALPN, or an HTTP/1.1 upgrade) is
+//! the caller's responsibility.
 //!
-//! There are three ways to reach an appropriate state to start the HTTP/2
-//! handshake.
-//!
-//! * Opening an HTTP/1.1 connection and performing an [upgrade].
-//! * Opening a connection with TLS and use ALPN to negotiate the protocol.
-//! * Open a connection with prior knowledge, i.e. both the client and the
-//!   server assume that the connection is immediately ready to start the
-//!   HTTP/2 handshake once opened.
-//!
-//! Once the connection is ready to start the HTTP/2 handshake, it can be
-//! passed to [`server::handshake`] or [`client::handshake`]. At this point, the
-//! library will start the handshake process, which consists of:
+//! A connection is created with [`client::handshake`] or
+//! [`server::handshake`]. The handshake bytes are then exchanged through the
+//! normal `recv` / `poll_transmit` cycle:
 //!
 //! * The client sends the connection preface (a predefined sequence of 24
-//!   octets).
-//! * Both the client and the server sending a SETTINGS frame.
+//!   octets), which the server consumes transparently in `recv`.
+//! * Both the client and the server send a SETTINGS frame.
 //!
-//! See the [Starting HTTP/2] in the specification for more details.
+//! Both of these are queued automatically when the connection is created and
+//! emitted by the first call to `poll_transmit`. See [Starting HTTP/2] in the
+//! specification for more details.
 //!
 //! # Flow control
 //!
-//! [Flow control] is a fundamental feature of HTTP/2. The `h2` library
-//! exposes flow control to the user.
+//! [Flow control] is a fundamental feature of HTTP/2. An endpoint may not send
+//! unlimited data to the peer: each stream has a window size, and a connection
+//! level window governs data across all streams. The peer replenishes a window
+//! by sending `WINDOW_UPDATE` frames.
 //!
-//! An HTTP/2 client or server may not send unlimited data to the peer. When a
-//! stream is initiated, both the client and the server are provided with an
-//! initial window size for that stream.  A window size is the number of bytes
-//! the endpoint can send to the peer. At any point in time, the peer may
-//! increase this window size by sending a `WINDOW_UPDATE` frame. Once a client
-//! or server has sent data filling the window for a stream, no further data may
-//! be sent on that stream until the peer increases the window.
+//! For **outbound** data, [`SendStream`] exposes the current capacity and lets
+//! the caller reserve capacity before sending; if more data is sent than there
+//! is capacity for, the excess is buffered until the peer grants more.
 //!
-//! There is also a **connection level** window governing data sent across all
-//! streams.
-//!
-//! Managing flow control for inbound data is done through [`FlowControl`].
-//! Managing flow control for outbound data is done through [`SendStream`]. See
-//! the struct level documentation for those two types for more details.
+//! For **inbound** data, the library automatically releases stream and
+//! connection capacity as `Data` events are surfaced, replenishing the peer's
+//! window as the application consumes data.
 //!
 //! [HTTP/2]: https://http2.github.io/
-//! [futures]: https://docs.rs/futures/
 //! [`client`]: client/index.html
 //! [`server`]: server/index.html
 //! [Flow control]: http://httpwg.org/specs/rfc7540.html#FlowControl
-//! [`FlowControl`]: struct.FlowControl.html
 //! [`SendStream`]: struct.SendStream.html
 //! [Starting HTTP/2]: http://httpwg.org/specs/rfc7540.html#starting
-//! [upgrade]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Protocol_upgrade_mechanism
 //! [`server::handshake`]: server/fn.handshake.html
 //! [`client::handshake`]: client/fn.handshake.html
 
@@ -149,7 +135,7 @@ mod share;
 pub mod fuzz_bridge;
 
 pub use crate::error::{Error, Reason};
-pub use crate::share::{FlowControl, Ping, PingPong, Pong, RecvStream, SendStream, StreamId};
+pub use crate::share::{SendStream, StreamId};
 
 #[cfg(feature = "unstable")]
 pub use codec::{Codec, SendError, UserError};

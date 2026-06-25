@@ -1,3 +1,18 @@
+# Unreleased
+
+* **Sans-I/O rewrite.** `h2` no longer performs any I/O and no longer depends
+  on Tokio or `futures`. The caller owns the transport and drives a connection
+  with `recv(&[u8])`, `poll_transmit(&mut BytesMut)`, and `poll_event()`.
+* The futures-based API (`client`/`server` `handshake` futures, `SendRequest`,
+  `ResponseFuture`, `Connection` futures) is replaced by explicit
+  `client::Connection` / `server::Connection` state machines plus an `Event`
+  enum.
+* Removed the orphaned `RecvStream`, `FlowControl`, `PingPong`, `Ping`, and
+  `Pong` public types and the `stream` feature; inbound flow control is now
+  released automatically as `Data` events are surfaced.
+* No cryptography: TLS is entirely out of scope, making the crate a natural fit
+  for kernel TLS (kTLS).
+
 # 0.4.15 (June 15, 2026)
 
 * Fix closing a connection when header size is "way too large" (currently x4 configured limit).

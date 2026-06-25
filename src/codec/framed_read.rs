@@ -339,12 +339,11 @@ fn decode_frame(
         Kind::Continuation => {
             let is_end_headers = (head.flag() & 0x4) == 0x4;
 
-            let mut partial = match partial_inout.take() {
-                Some(partial) => partial,
-                None => {
-                    proto_err!(conn: "received unexpected CONTINUATION frame");
-                    return Err(Error::library_go_away(Reason::PROTOCOL_ERROR));
-                }
+            let mut partial = if let Some(partial) = partial_inout.take() {
+                partial
+            } else {
+                proto_err!(conn: "received unexpected CONTINUATION frame");
+                return Err(Error::library_go_away(Reason::PROTOCOL_ERROR));
             };
 
             // The stream identifiers must match
@@ -364,9 +363,8 @@ fn decode_frame(
                         Reason::ENHANCE_YOUR_CALM,
                         "too_many_continuations",
                     ));
-                } else {
-                    partial.continuation_frames_count = cnt;
                 }
+                partial.continuation_frames_count = cnt;
             }
 
             // Extend the buf
@@ -399,7 +397,7 @@ fn decode_frame(
                 .frame
                 .load_hpack(&mut partial.buf, max_header_list_size, hpack)
             {
-                Ok(_) => {}
+                Ok(()) => {}
                 Err(frame::Error::Hpack(hpack::DecoderError::NeedMore(_))) if !is_end_headers => {}
                 Err(frame::Error::MalformedMessage) => {
                     let id = head.stream_id();

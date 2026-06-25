@@ -1,5 +1,5 @@
 use crate::codec::UserError;
-use crate::codec::UserError::*;
+use crate::codec::UserError::PayloadTooBig;
 use crate::frame::{self, Frame, FrameSize};
 use crate::hpack;
 
@@ -59,7 +59,7 @@ enum Next<B> {
 
 /// Initialize the connection with this amount of write buffer.
 ///
-/// The minimum MAX_FRAME_SIZE is 16kb, so always be able to send a HEADERS
+/// The minimum `MAX_FRAME_SIZE` is 16kb, so always be able to send a HEADERS
 /// frame that big.
 const DEFAULT_BUFFER_CAPACITY: usize = 16 * 1_024;
 
@@ -115,17 +115,14 @@ where
 
         loop {
             while !self.encoder.is_empty() {
-                match self.encoder.next {
-                    Some(Next::Data(ref mut frame)) => {
-                        tracing::trace!(queued_data_frame = true);
-                        // Header (and any chained prefix) followed by the
-                        // remaining payload.
-                        dst.put((&mut self.encoder.buf).chain(frame.payload_mut()));
-                    }
-                    _ => {
-                        tracing::trace!(queued_data_frame = false);
-                        dst.put(&mut self.encoder.buf);
-                    }
+                if let Some(Next::Data(ref mut frame)) = self.encoder.next {
+                    tracing::trace!(queued_data_frame = true);
+                    // Header (and any chained prefix) followed by the
+                    // remaining payload.
+                    dst.put((&mut self.encoder.buf).chain(frame.payload_mut()));
+                } else {
+                    tracing::trace!(queued_data_frame = false);
+                    dst.put(&mut self.encoder.buf);
                 }
             }
 

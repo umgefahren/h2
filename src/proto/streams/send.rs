@@ -198,7 +198,7 @@ impl Send {
         Ok(())
     }
 
-    /// Send an explicit RST_STREAM frame
+    /// Send an explicit `RST_STREAM` frame
     pub fn send_reset<B>(
         &mut self,
         reason: Reason,
@@ -355,7 +355,7 @@ impl Send {
         stream: &mut store::Ptr,
         counts: &mut Counts,
     ) {
-        self.prioritize.reserve_capacity(capacity, stream, counts)
+        self.prioritize.reserve_capacity(capacity, stream, counts);
     }
 
     pub fn poll_capacity(
@@ -397,12 +397,11 @@ impl Send {
         stream: &mut Stream,
         mode: PollReset,
     ) -> Poll<Result<Reason, crate::Error>> {
-        match stream.state.ensure_reason(mode)? {
-            Some(reason) => Poll::Ready(Ok(reason)),
-            None => {
-                stream.wait_send(cx);
-                Poll::Pending
-            }
+        if let Some(reason) = stream.state.ensure_reason(mode)? {
+            Poll::Ready(Ok(reason))
+        } else {
+            stream.wait_send(cx);
+            Poll::Pending
         }
     }
 
@@ -591,7 +590,7 @@ impl Send {
         }
 
         if let Some(val) = settings.is_push_enabled() {
-            self.is_push_enabled = val
+            self.is_push_enabled = val;
         }
 
         Ok(())

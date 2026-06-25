@@ -189,7 +189,7 @@ impl Default for Encoder {
 }
 
 fn encode_size_update(val: usize, dst: &mut BytesMut) {
-    encode_int(val, 5, 0b0010_0000, dst)
+    encode_int(val, 5, 0b0010_0000, dst);
 }
 
 fn encode_not_indexed(name: usize, value: &[u8], sensitive: bool, dst: &mut BytesMut) {
@@ -214,7 +214,10 @@ fn encode_not_indexed2(name: &[u8], value: &[u8], sensitive: bool, dst: &mut Byt
 }
 
 fn encode_str(val: &[u8], dst: &mut BytesMut) {
-    if !val.is_empty() {
+    if val.is_empty() {
+        // Write an empty string
+        dst.put_u8(0);
+    } else {
         let idx = position(dst);
 
         // Push a placeholder byte for the length header
@@ -254,9 +257,6 @@ fn encode_str(val: &[u8], dst: &mut BytesMut) {
                 dst[idx + i] = buf[i];
             }
         }
-    } else {
-        // Write an empty string
-        dst.put_u8(0);
     }
 }
 

@@ -42,7 +42,7 @@ pub fn len(name: &HeaderName, value: &HeaderValue) -> usize {
 
 impl Header<Option<HeaderName>> {
     pub fn reify(self) -> Result<Header, HeaderValue> {
-        use self::Header::*;
+        use self::Header::{Authority, Field, Method, Path, Protocol, Scheme, Status};
 
         Ok(match self {
             Field {
@@ -226,7 +226,7 @@ impl From<Header> for Header<Option<HeaderName>> {
     }
 }
 
-impl<'a> Name<'a> {
+impl Name<'_> {
     pub fn into_entry(self, value: Bytes) -> Result<Header, DecoderError> {
         match self {
             Name::Field(name) => Ok(Header::Field {

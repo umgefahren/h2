@@ -203,11 +203,11 @@ impl DataFlags {
     }
 
     fn set_end_stream(&mut self) {
-        self.0 |= END_STREAM
+        self.0 |= END_STREAM;
     }
 
     fn unset_end_stream(&mut self) {
-        self.0 &= !END_STREAM
+        self.0 &= !END_STREAM;
     }
 
     fn is_padded(&self) -> bool {

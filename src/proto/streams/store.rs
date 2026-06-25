@@ -1,4 +1,4 @@
-use super::*;
+use super::{store, Stream, StreamId};
 
 use indexmap::{self, IndexMap};
 
@@ -115,7 +115,7 @@ impl Store {
     }
 
     pub fn find_entry(&mut self, id: StreamId) -> Entry<'_> {
-        use self::indexmap::map::Entry::*;
+        use self::indexmap::map::Entry::{Occupied, Vacant};
 
         match self.ids.entry(id) {
             Occupied(e) => Entry::Occupied(OccupiedEntry { ids: e }),
@@ -270,24 +270,21 @@ where
         debug_assert!(N::next(stream).is_none());
 
         // Queue the stream
-        match self.indices {
-            Some(ref mut idxs) => {
-                tracing::trace!(" -> existing entries");
+        if let Some(ref mut idxs) = self.indices {
+            tracing::trace!(" -> existing entries");
 
-                // Update the current tail node to point to `stream`
-                let key = stream.key();
-                N::set_next(&mut stream.resolve(idxs.tail), Some(key));
+            // Update the current tail node to point to `stream`
+            let key = stream.key();
+            N::set_next(&mut stream.resolve(idxs.tail), Some(key));
 
-                // Update the tail pointer
-                idxs.tail = stream.key();
-            }
-            None => {
-                tracing::trace!(" -> first entry");
-                self.indices = Some(store::Indices {
-                    head: stream.key(),
-                    tail: stream.key(),
-                });
-            }
+            // Update the tail pointer
+            idxs.tail = stream.key();
+        } else {
+            tracing::trace!(" -> first entry");
+            self.indices = Some(store::Indices {
+                head: stream.key(),
+                tail: stream.key(),
+            });
         }
 
         true
@@ -310,24 +307,21 @@ where
         debug_assert!(N::next(stream).is_none());
 
         // Queue the stream
-        match self.indices {
-            Some(ref mut idxs) => {
-                tracing::trace!(" -> existing entries");
+        if let Some(ref mut idxs) = self.indices {
+            tracing::trace!(" -> existing entries");
 
-                // Update the provided stream to point to the head node
-                let head_key = stream.resolve(idxs.head).key();
-                N::set_next(stream, Some(head_key));
+            // Update the provided stream to point to the head node
+            let head_key = stream.resolve(idxs.head).key();
+            N::set_next(stream, Some(head_key));
 
-                // Update the head pointer
-                idxs.head = stream.key();
-            }
-            None => {
-                tracing::trace!(" -> first entry");
-                self.indices = Some(store::Indices {
-                    head: stream.key(),
-                    tail: stream.key(),
-                });
-            }
+            // Update the head pointer
+            idxs.head = stream.key();
+        } else {
+            tracing::trace!(" -> first entry");
+            self.indices = Some(store::Indices {
+                head: stream.key(),
+                tail: stream.key(),
+            });
         }
 
         true
@@ -388,7 +382,7 @@ impl<N> fmt::Debug for Queue<N> {
 
 // ===== impl Ptr =====
 
-impl<'a> Ptr<'a> {
+impl Ptr<'_> {
     /// Returns the Key associated with the stream
     pub fn key(&self) -> Key {
         self.key
@@ -409,7 +403,7 @@ impl<'a> Ptr<'a> {
         stream.id
     }
 
-    /// Remove the StreamId -> stream state association.
+    /// Remove the `StreamId` -> stream state association.
     ///
     /// This will effectively remove the stream as far as the H2 protocol is
     /// concerned.
@@ -419,7 +413,7 @@ impl<'a> Ptr<'a> {
     }
 }
 
-impl<'a> Resolve for Ptr<'a> {
+impl Resolve for Ptr<'_> {
     fn resolve(&mut self, key: Key) -> Ptr<'_> {
         Ptr {
             key,
@@ -428,7 +422,7 @@ impl<'a> Resolve for Ptr<'a> {
     }
 }
 
-impl<'a> ops::Deref for Ptr<'a> {
+impl ops::Deref for Ptr<'_> {
     type Target = Stream;
 
     fn deref(&self) -> &Stream {
@@ -436,13 +430,13 @@ impl<'a> ops::Deref for Ptr<'a> {
     }
 }
 
-impl<'a> ops::DerefMut for Ptr<'a> {
+impl ops::DerefMut for Ptr<'_> {
     fn deref_mut(&mut self) -> &mut Stream {
         &mut self.store[self.key]
     }
 }
 
-impl<'a> fmt::Debug for Ptr<'a> {
+impl fmt::Debug for Ptr<'_> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         (**self).fmt(fmt)
     }
@@ -450,7 +444,7 @@ impl<'a> fmt::Debug for Ptr<'a> {
 
 // ===== impl OccupiedEntry =====
 
-impl<'a> OccupiedEntry<'a> {
+impl OccupiedEntry<'_> {
     pub fn key(&self) -> Key {
         let stream_id = *self.ids.key();
         let index = *self.ids.get();
@@ -460,7 +454,7 @@ impl<'a> OccupiedEntry<'a> {
 
 // ===== impl VacantEntry =====
 
-impl<'a> VacantEntry<'a> {
+impl VacantEntry<'_> {
     pub fn insert(self, value: Stream) -> Key {
         // Insert the value in the slab
         let stream_id = value.id;

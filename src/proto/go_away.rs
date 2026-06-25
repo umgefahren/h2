@@ -109,8 +109,7 @@ impl GoAway {
             && self
                 .going_away
                 .as_ref()
-                .map(|g| g.last_processed_id != StreamId::MAX)
-                .unwrap_or(false)
+                .map_or(false, |g| g.last_processed_id != StreamId::MAX)
     }
 
     /// Try to write a pending GOAWAY frame to the buffer.

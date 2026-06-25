@@ -75,7 +75,7 @@ impl<B> Codec<B> {
     /// before calling this function, then the frame will be allowed.
     #[inline]
     pub fn set_max_recv_frame_size(&mut self, val: usize) {
-        self.read.set_max_frame_size(val)
+        self.read.set_max_frame_size(val);
     }
 
     /// Returns the current max received frame size setting.
@@ -95,17 +95,17 @@ impl<B> Codec<B> {
 
     /// Set the peer's max frame size.
     pub fn set_max_send_frame_size(&mut self, val: usize) {
-        self.write.set_max_frame_size(val)
+        self.write.set_max_frame_size(val);
     }
 
     /// Set the peer's header table size size.
     pub fn set_send_header_table_size(&mut self, val: usize) {
-        self.write.set_header_table_size(val)
+        self.write.set_header_table_size(val);
     }
 
     /// Set the decoder header table size size.
     pub fn set_recv_header_table_size(&mut self, val: usize) {
-        self.read.set_header_table_size(val)
+        self.read.set_header_table_size(val);
     }
 
     /// Set the max header list size that can be received.
@@ -149,7 +149,7 @@ where
     /// `has_capacity` (or `poll_ready`) must be checked first to ensure that a
     /// frame may be accepted.
     ///
-    /// TODO: Rename this to avoid conflicts with Sink::buffer
+    /// TODO: Rename this to avoid conflicts with `Sink::buffer`
     pub fn buffer(&mut self, item: Frame<B>) -> Result<(), UserError> {
         self.write.buffer(item)
     }

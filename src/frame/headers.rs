@@ -42,7 +42,7 @@ pub struct PushPromise {
     /// The ID of the stream with which this frame is associated.
     stream_id: StreamId,
 
-    /// The ID of the stream being reserved by this PushPromise.
+    /// The ID of the stream being reserved by this `PushPromise`.
     promised_id: StreamId,
 
     /// The header block fragment
@@ -241,7 +241,7 @@ impl Headers {
     }
 
     pub fn set_end_stream(&mut self) {
-        self.flags.set_end_stream()
+        self.flags.set_end_stream();
     }
 
     pub fn is_over_size(&self) -> bool {
@@ -340,7 +340,7 @@ pub fn parse_u64(src: &[u8]) -> Result<u64, ParseU64Error> {
         }
 
         ret *= 10;
-        ret += (d - b'0') as u64;
+        ret += u64::from(d - b'0');
     }
 
     Ok(ret)
@@ -375,7 +375,7 @@ impl PushPromise {
     }
 
     pub fn validate_request(req: &Request<()>) -> Result<(), PushPromiseHeaderError> {
-        use PushPromiseHeaderError::*;
+        use PushPromiseHeaderError::{InvalidContentLength, NotSafeAndCacheable};
         // The spec has some requirements for promised request headers
         // [https://httpwg.org/specs/rfc7540.html#PushRequests]
 
@@ -566,8 +566,7 @@ impl Pseudo {
         } else {
             let path = parts
                 .path_and_query
-                .map(|v| BytesStr::from(v.as_str()))
-                .unwrap_or(BytesStr::from_static(""));
+                .map_or(BytesStr::from_static(""), |v| BytesStr::from(v.as_str()));
 
             let path = if !path.is_empty() {
                 path
@@ -702,7 +701,7 @@ impl Iterator for Iter {
     type Item = hpack::Header<Option<HeaderName>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        use crate::hpack::Header::*;
+        use crate::hpack::Header::{Authority, Field, Method, Path, Protocol, Scheme, Status};
 
         if let Some(ref mut pseudo) = self.pseudo {
             if let Some(method) = pseudo.method.take() {
@@ -905,7 +904,7 @@ impl HeaderBlock {
         // the hpack state is connection level. In order to maintain correct
         // state for other streams, the hpack decoding process must complete.
         let res = decoder.decode(&mut cursor, |header| {
-            use crate::hpack::Header::*;
+            use crate::hpack::Header::{Authority, Field, Method, Path, Protocol, Scheme, Status};
 
             match header {
                 Field { name, value } => {
@@ -993,7 +992,7 @@ impl HeaderBlock {
 
     /// Calculates the size of the currently decoded header list.
     ///
-    /// According to http://httpwg.org/specs/rfc7540.html#SETTINGS_MAX_HEADER_LIST_SIZE
+    /// According to <http://httpwg.org/specs/rfc7540.html#SETTINGS_MAX_HEADER_LIST_SIZE>
     ///
     /// > The value is based on the uncompressed size of header fields,
     /// > including the length of the name and value in octets plus an

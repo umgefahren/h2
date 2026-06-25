@@ -26,7 +26,9 @@ use self::store::Store;
 use self::stream::Stream;
 
 use crate::frame::{StreamId, StreamIdOverflow};
-use crate::proto::*;
+use crate::proto::{
+    frame, peer, Buf, Codec, Error, Frame, Initiator, Peer, WindowSize, MAX_WINDOW_SIZE,
+};
 
 use bytes::Bytes;
 use std::time::Duration;
@@ -36,7 +38,7 @@ pub struct Config {
     /// Initial maximum number of locally initiated streams.
     /// After receiving a Settings frame from the remote peer,
     /// the connection will overwrite this value with the
-    /// MAX_CONCURRENT_STREAMS specified in the frame.
+    /// `MAX_CONCURRENT_STREAMS` specified in the frame.
     pub initial_max_send_streams: usize,
 
     /// Max amount of DATA bytes to buffer per stream.

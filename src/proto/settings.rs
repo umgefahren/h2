@@ -1,6 +1,6 @@
 use crate::codec::UserError;
 use crate::error::Reason;
-use crate::proto::*;
+use crate::proto::{frame, Buf, Codec, Error, Peer, Streams};
 use std::task::{Context, Poll};
 
 #[derive(Debug)]

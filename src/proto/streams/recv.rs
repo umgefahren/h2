@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    frame, peer, store, stream, Buf, Buffer, Bytes, Codec, Config, Counts, Duration, Error,
+    FlowControl, Peer, Prioritized, Store, Stream, StreamId, StreamIdOverflow, WindowSize,
+    MAX_WINDOW_SIZE,
+};
 use crate::codec::UserError;
 use crate::frame::{PushPromiseHeaderError, Reason, DEFAULT_INITIAL_WINDOW_SIZE};
 use crate::proto;
@@ -51,7 +55,7 @@ pub(super) struct Recv {
     /// Holds frames that are waiting to be read
     buffer: Buffer<Event>,
 
-    /// Refused StreamId, this represents a frame that must be sent out.
+    /// Refused `StreamId`, this represents a frame that must be sent out.
     refused: Option<StreamId>,
 
     /// If push promises are allowed to be received.
@@ -180,12 +184,11 @@ impl Recv {
             use http::header;
 
             if let Some(content_length) = frame.fields().get(header::CONTENT_LENGTH) {
-                let content_length = match frame::parse_u64(content_length.as_bytes()) {
-                    Ok(v) => v,
-                    Err(_) => {
-                        proto_err!(stream: "could not parse content-length; stream={:?}", stream.id);
-                        return Err(Error::library_reset(stream.id, Reason::PROTOCOL_ERROR).into());
-                    }
+                let content_length = if let Ok(v) = frame::parse_u64(content_length.as_bytes()) {
+                    v
+                } else {
+                    proto_err!(stream: "could not parse content-length; stream={:?}", stream.id);
+                    return Err(Error::library_reset(stream.id, Reason::PROTOCOL_ERROR).into());
                 };
 
                 stream.content_length = ContentLength::Remaining(content_length);
@@ -250,7 +253,22 @@ impl Recv {
             return Err(Error::library_reset(stream.id, Reason::PROTOCOL_ERROR).into());
         }
 
-        if !pseudo.is_informational() {
+        if pseudo.is_informational() {
+            // This is an informational response (1xx status code)
+            // Convert to response and store it for polling
+            let message = counts
+                .peer()
+                .convert_poll_message(pseudo, fields, stream_id)?;
+
+            tracing::trace!("Received informational response: stream_id={:?}", stream_id);
+
+            // Push the informational response onto the stream's recv buffer
+            // with a special event type so it can be polled separately
+            stream
+                .pending_recv
+                .push_back(&mut self.buffer, Event::InformationalHeaders(message));
+            stream.notify_recv();
+        } else {
             let message = counts
                 .peer()
                 .convert_poll_message(pseudo, fields, stream_id)?;
@@ -268,21 +286,6 @@ impl Recv {
                 // corresponding headers frame pushed to `stream.pending_recv`.
                 self.pending_accept.push(stream);
             }
-        } else {
-            // This is an informational response (1xx status code)
-            // Convert to response and store it for polling
-            let message = counts
-                .peer()
-                .convert_poll_message(pseudo, fields, stream_id)?;
-
-            tracing::trace!("Received informational response: stream_id={:?}", stream_id);
-
-            // Push the informational response onto the stream's recv buffer
-            // with a special event type so it can be polled separately
-            stream
-                .pending_recv
-                .push_back(&mut self.buffer, Event::InformationalHeaders(message));
-            stream.notify_recv();
         }
 
         Ok(())
@@ -295,7 +298,7 @@ impl Recv {
     /// Panics if `stream.pending_recv` has no `Event::Headers` queued.
     ///
     pub fn take_request(&mut self, stream: &mut store::Ptr) -> Request<()> {
-        use super::peer::PollMessage::*;
+        use super::peer::PollMessage::Server;
 
         match stream.pending_recv.pop_front(&mut self.buffer) {
             Some(Event::Headers(Server(request))) => request,
@@ -309,7 +312,7 @@ impl Recv {
         cx: &Context,
         stream: &mut store::Ptr,
     ) -> Poll<Option<Result<(Request<()>, store::Key), proto::Error>>> {
-        use super::peer::PollMessage::*;
+        use super::peer::PollMessage::Server;
 
         let mut ppp = stream.pending_push_promises.take();
         let pushed = ppp.pop(stream.store_mut()).map(|mut pushed| {
@@ -341,7 +344,7 @@ impl Recv {
         cx: &Context,
         stream: &mut store::Ptr,
     ) -> Poll<Result<Response<()>, proto::Error>> {
-        use super::peer::PollMessage::*;
+        use super::peer::PollMessage::Client;
 
         // Skip over any interim informational headers to find the main response
         loop {
@@ -374,7 +377,7 @@ impl Recv {
         cx: &Context,
         stream: &mut store::Ptr,
     ) -> Poll<Option<Result<Response<()>, proto::Error>>> {
-        use super::peer::PollMessage::*;
+        use super::peer::PollMessage::Client;
 
         // Try to pop the front event and check if it's an informational response
         // If it's not, we put it back
@@ -515,11 +518,11 @@ impl Recv {
     /// Set the "target" connection window size.
     ///
     /// By default, all new connections start with 64kb of window size. As
-    /// streams used and release capacity, we will send WINDOW_UPDATEs for the
+    /// streams used and release capacity, we will send `WINDOW_UPDATEs` for the
     /// connection to bring it back up to the initial "target".
     ///
     /// Setting a target means that we will try to tell the peer about
-    /// WINDOW_UPDATEs so the peer knows it has about `target` window to use
+    /// `WINDOW_UPDATEs` so the peer knows it has about `target` window to use
     /// for the whole connection.
     ///
     /// The `task` is an optional parked task for the `Connection` that might
@@ -830,7 +833,7 @@ impl Recv {
         let req = crate::server::Peer::convert_poll_message(pseudo, fields, promised_id)?;
 
         if let Err(e) = frame::PushPromise::validate_request(&req) {
-            use PushPromiseHeaderError::*;
+            use PushPromiseHeaderError::{InvalidContentLength, NotSafeAndCacheable};
             match e {
                 NotSafeAndCacheable => proto_err!(
                     stream:
@@ -848,7 +851,7 @@ impl Recv {
             return Err(Error::library_reset(promised_id, Reason::PROTOCOL_ERROR));
         }
 
-        use super::peer::PollMessage::*;
+        use super::peer::PollMessage::Server;
         stream
             .pending_recv
             .push_back(&mut self.buffer, Event::Headers(Server(req)));
@@ -873,7 +876,7 @@ impl Recv {
         Ok(())
     }
 
-    /// Handle remote sending an explicit RST_STREAM.
+    /// Handle remote sending an explicit `RST_STREAM`.
     pub fn recv_reset(
         &mut self,
         frame: frame::Reset,
@@ -1063,7 +1066,7 @@ impl Recv {
         while let Some(stream) = self.pending_window_updates.pop(store) {
             counts.transition(stream, |_, stream| {
                 tracing::trace!("clear_stream_window_update_queue; stream={:?}", stream.id);
-            })
+            });
         }
     }
 
@@ -1177,7 +1180,7 @@ impl Recv {
                         .inc_window(incr)
                         .expect("unexpected flow control state");
                 }
-            })
+            });
         }
     }
 

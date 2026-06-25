@@ -107,7 +107,7 @@ impl Table {
 
     /// Gets the header stored in the table
     pub fn resolve<'a>(&'a self, index: &'a Index) -> &'a Header {
-        use self::Index::*;
+        use self::Index::{Indexed, Inserted, InsertedValue, Name, NotIndexed};
 
         match *index {
             Indexed(_, ref h) => h,
@@ -119,7 +119,7 @@ impl Table {
     }
 
     pub fn resolve_idx(&self, index: &Index) -> usize {
-        use self::Index::*;
+        use self::Index::{Indexed, Inserted, InsertedValue, Name, NotIndexed};
 
         match *index {
             Indexed(idx, ..) => idx,

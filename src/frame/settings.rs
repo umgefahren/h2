@@ -37,19 +37,19 @@ pub struct SettingsFlags(u8);
 const ACK: u8 = 0x1;
 const ALL: u8 = ACK;
 
-/// The default value of SETTINGS_HEADER_TABLE_SIZE
+/// The default value of `SETTINGS_HEADER_TABLE_SIZE`
 pub const DEFAULT_SETTINGS_HEADER_TABLE_SIZE: usize = 4_096;
 
-/// The default value of SETTINGS_INITIAL_WINDOW_SIZE
+/// The default value of `SETTINGS_INITIAL_WINDOW_SIZE`
 pub const DEFAULT_INITIAL_WINDOW_SIZE: u32 = 65_535;
 
-/// The default value of MAX_FRAME_SIZE
+/// The default value of `MAX_FRAME_SIZE`
 pub const DEFAULT_MAX_FRAME_SIZE: FrameSize = 16_384;
 
-/// INITIAL_WINDOW_SIZE upper bound
+/// `INITIAL_WINDOW_SIZE` upper bound
 pub const MAX_INITIAL_WINDOW_SIZE: usize = (1 << 31) - 1;
 
-/// MAX_FRAME_SIZE upper bound
+/// `MAX_FRAME_SIZE` upper bound
 pub const MAX_MAX_FRAME_SIZE: FrameSize = (1 << 24) - 1;
 
 // ===== impl Settings =====
@@ -106,7 +106,7 @@ impl Settings {
     }
 
     pub fn set_enable_push(&mut self, enable: bool) {
-        self.enable_push = Some(enable as u32);
+        self.enable_push = Some(u32::from(enable));
     }
 
     pub fn is_extended_connect_protocol_enabled(&self) -> Option<bool> {
@@ -126,7 +126,10 @@ impl Settings {
     }
 
     pub fn load(head: Head, payload: &[u8]) -> Result<Settings, Error> {
-        use self::Setting::*;
+        use self::Setting::{
+            EnableConnectProtocol, EnablePush, HeaderTableSize, InitialWindowSize,
+            MaxConcurrentStreams, MaxFrameSize, MaxHeaderListSize,
+        };
 
         debug_assert_eq!(head.kind(), crate::frame::Kind::Settings);
 
@@ -175,9 +178,8 @@ impl Settings {
                 Some(InitialWindowSize(val)) => {
                     if val as usize > MAX_INITIAL_WINDOW_SIZE {
                         return Err(Error::InvalidSettingValue);
-                    } else {
-                        settings.initial_window_size = Some(val);
                     }
+                    settings.initial_window_size = Some(val);
                 }
                 Some(MaxFrameSize(val)) => {
                     if DEFAULT_MAX_FRAME_SIZE <= val && val <= MAX_MAX_FRAME_SIZE {
@@ -222,12 +224,15 @@ impl Settings {
         // Encode the settings
         self.for_each(|setting| {
             tracing::trace!("encoding setting; val={:?}", setting);
-            setting.encode(dst)
+            setting.encode(dst);
         });
     }
 
     fn for_each<F: FnMut(Setting)>(&self, mut f: F) {
-        use self::Setting::*;
+        use self::Setting::{
+            EnableConnectProtocol, EnablePush, HeaderTableSize, InitialWindowSize,
+            MaxConcurrentStreams, MaxFrameSize, MaxHeaderListSize,
+        };
 
         if let Some(v) = self.header_table_size {
             f(HeaderTableSize(v));
@@ -305,7 +310,10 @@ impl Setting {
     /// given setting id, based on the settings IDs defined in section
     /// 6.5.2.
     pub fn from_id(id: u16, val: u32) -> Option<Setting> {
-        use self::Setting::*;
+        use self::Setting::{
+            EnableConnectProtocol, EnablePush, HeaderTableSize, InitialWindowSize,
+            MaxConcurrentStreams, MaxFrameSize, MaxHeaderListSize,
+        };
 
         match id {
             1 => Some(HeaderTableSize(val)),
@@ -337,7 +345,10 @@ impl Setting {
     }
 
     fn encode(&self, dst: &mut BytesMut) {
-        use self::Setting::*;
+        use self::Setting::{
+            EnableConnectProtocol, EnablePush, HeaderTableSize, InitialWindowSize,
+            MaxConcurrentStreams, MaxFrameSize, MaxHeaderListSize,
+        };
 
         let (kind, val) = match *self {
             HeaderTableSize(v) => (1, v),

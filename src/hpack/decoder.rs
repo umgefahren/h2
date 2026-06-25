@@ -182,7 +182,9 @@ impl Decoder {
     where
         F: FnMut(Header) -> ControlFlow<()>,
     {
-        use self::Representation::*;
+        use self::Representation::{
+            Indexed, LiteralNeverIndexed, LiteralWithIndexing, LiteralWithoutIndexing, SizeUpdate,
+        };
 
         let mut can_resize = true;
 
@@ -514,7 +516,7 @@ impl Table {
     /// table. They are merged into a single index address space, though.
     ///
     /// This is according to the [HPACK spec, section 2.3.3.]
-    /// (http://http2.github.io/http2-spec/compression.html#index.address.space)
+    /// (<http://http2.github.io/http2-spec/compression.html#index.address.space>)
     pub fn get(&self, index: usize) -> Result<Header, DecoderError> {
         if index == 0 {
             return Err(DecoderError::InvalidTableIndex);

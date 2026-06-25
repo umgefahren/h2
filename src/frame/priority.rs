@@ -1,4 +1,4 @@
-use crate::frame::*;
+use crate::frame::{Error, Frame, Head, StreamId};
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Priority {

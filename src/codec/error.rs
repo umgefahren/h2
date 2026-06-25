@@ -85,7 +85,12 @@ impl error::Error for UserError {}
 
 impl fmt::Display for UserError {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        use self::UserError::*;
+        use self::UserError::{
+            InactiveStreamId, InvalidInformationalStatusCode, MalformedHeaders,
+            MissingUriSchemeAndAuthority, OverflowedStreamId, PayloadTooBig,
+            PeerDisabledServerPush, PollResetAfterSendResponse, Rejected, ReleaseCapacityTooBig,
+            SendPingWhilePending, SendSettingsWhilePending, UnexpectedFrameType,
+        };
 
         fmt.write_str(match *self {
             InactiveStreamId => "inactive stream",

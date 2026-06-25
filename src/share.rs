@@ -97,13 +97,14 @@ impl<B: Buf> SendStream<B> {
     /// flow control works.
     pub fn reserve_capacity(&mut self, capacity: usize) {
         // TODO: Check for overflow
-        self.inner.reserve_capacity(capacity as WindowSize)
+        self.inner.reserve_capacity(capacity as WindowSize);
     }
 
     /// Returns the stream's current send capacity.
     ///
     /// This allows the caller to check the current amount of available capacity
     /// before sending data.
+    #[must_use]
     pub fn capacity(&self) -> usize {
         self.inner.capacity() as usize
     }
@@ -136,7 +137,7 @@ impl<B: Buf> SendStream<B> {
     /// This cancels the request / response exchange. If the response has not
     /// yet been received, the peer is notified with a `RST_STREAM` frame.
     pub fn send_reset(&mut self, reason: Reason) {
-        self.inner.send_reset(reason)
+        self.inner.send_reset(reason);
     }
 
     /// Returns the stream ID of this `SendStream`.
@@ -144,6 +145,7 @@ impl<B: Buf> SendStream<B> {
     /// # Panics
     ///
     /// If the lock on the stream store has been poisoned.
+    #[must_use]
     pub fn stream_id(&self) -> StreamId {
         StreamId::from_internal(self.inner.stream_id())
     }
@@ -168,6 +170,7 @@ impl StreamId {
     /// included as an inherent method because that implementation doesn't
     /// appear in rustdocs, as well as a way to force the type instead of
     /// relying on inference.
+    #[must_use]
     pub fn as_u32(&self) -> u32 {
         (*self).into()
     }

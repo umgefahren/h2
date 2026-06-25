@@ -127,6 +127,7 @@ pub struct Connection<B: Buf = Bytes> {
 ///
 /// The initial `SETTINGS` frame is queued immediately; call
 /// [`Connection::poll_transmit`] to obtain the bytes to write.
+#[must_use]
 pub fn handshake() -> Connection<Bytes> {
     Builder::new().handshake()
 }
@@ -135,6 +136,7 @@ pub fn handshake() -> Connection<Bytes> {
 
 impl Builder {
     /// Returns a new server builder with default configuration values.
+    #[must_use]
     pub fn new() -> Builder {
         Builder {
             reset_stream_duration: Duration::from_secs(proto::DEFAULT_RESET_STREAM_SECS),
@@ -192,6 +194,7 @@ impl Builder {
     }
 
     /// Creates a new configured server connection.
+    #[must_use]
     pub fn handshake<B: Buf>(&self) -> Connection<B> {
         Connection::new(self.clone())
     }
@@ -357,8 +360,7 @@ where
     pub fn stream_capacity(&self, stream_id: crate::StreamId) -> usize {
         self.tracked
             .get(&stream_id.as_u32())
-            .map(|t| t.send.capacity() as usize)
-            .unwrap_or(0)
+            .map_or(0, |t| t.send.capacity() as usize)
     }
 
     /// Returns `true` once the connection has fully closed.
@@ -517,7 +519,7 @@ impl Peer {
             Parts {
                 status, headers, ..
             },
-            _,
+            (),
         ) = response.into_parts();
 
         // Build the set pseudo header set. All requests will include `method`
@@ -528,7 +530,7 @@ impl Peer {
         let mut frame = frame::Headers::new(id, pseudo, headers);
 
         if end_of_stream {
-            frame.set_end_stream()
+            frame.set_end_stream();
         }
 
         frame
@@ -542,7 +544,7 @@ impl Peer {
         use http::request::Parts;
 
         if let Err(e) = frame::PushPromise::validate_request(&request) {
-            use PushPromiseHeaderError::*;
+            use PushPromiseHeaderError::{InvalidContentLength, NotSafeAndCacheable};
             match e {
                 NotSafeAndCacheable => tracing::debug!(
                     ?promised_id,
@@ -566,7 +568,7 @@ impl Peer {
                 headers,
                 ..
             },
-            _,
+            (),
         ) = request.into_parts();
 
         let pseudo = Pseudo::request(method, uri, None);

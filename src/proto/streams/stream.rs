@@ -1,6 +1,6 @@
 use crate::Reason;
 
-use super::*;
+use super::{buffer, store, DebugStructExt, FlowControl, Initiator, State, StreamId, WindowSize};
 
 use std::fmt;
 use std::task::{Context, Waker};
@@ -100,7 +100,7 @@ pub(super) struct Stream {
     /// Frames pending for this stream to read
     pub pending_recv: buffer::Deque,
 
-    /// When the RecvStream drop occurs, no data should be received.
+    /// When the `RecvStream` drop occurs, no data should be received.
     pub is_recv: bool,
 
     /// Task tracking receiving frames
@@ -326,7 +326,7 @@ impl Stream {
         }
     }
 
-    /// If the capacity was limited because of the max_send_buffer_size,
+    /// If the capacity was limited because of the `max_send_buffer_size`,
     /// then consider waking the send task again...
     pub fn notify_capacity(&mut self) {
         self.send_capacity_inc = true;

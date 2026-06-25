@@ -3,7 +3,10 @@ use crate::frame::{Reason, StreamId};
 use crate::{client, server};
 
 use crate::frame::DEFAULT_INITIAL_WINDOW_SIZE;
-use crate::proto::*;
+use crate::proto::{
+    frame, streams, Buf, Codec, DynStreams, Error, Frame, GoAway, Initiator, Peer, PingPong,
+    Prioritized, Settings, StreamRef, Streams, UserPings, WindowSize,
+};
 
 use bytes::{Bytes, BytesMut};
 use std::io;
@@ -217,7 +220,7 @@ where
     }
 
     pub fn go_away_from_user(&mut self, e: Reason) {
-        self.inner.as_dyn().go_away_from_user(e)
+        self.inner.as_dyn().go_away_from_user(e);
     }
 
     fn take_error(&mut self, ours: Reason, initiator: Initiator) -> Result<(), Error> {
@@ -305,7 +308,7 @@ where
                         }
                     };
 
-                    self.inner.as_dyn().handle_poll2_result(result)?
+                    self.inner.as_dyn().handle_poll2_result(result)?;
                 }
                 State::Closing(reason, initiator) => {
                     tracing::trace!("connection closing after flush");
@@ -340,9 +343,8 @@ where
                         // A user initiated abrupt shutdown shouldn't return
                         // the same error back to the user.
                         return Poll::Ready(Ok(()));
-                    } else {
-                        return Poll::Ready(Err(Error::library_go_away(reason)));
                     }
+                    return Poll::Ready(Err(Error::library_go_away(reason)));
                 }
                 // Only NO_ERROR should be waiting for idle
                 debug_assert_eq!(
@@ -488,8 +490,10 @@ where
                 if self.streams.is_buffer_empty()
                     && matches!(kind, io::ErrorKind::UnexpectedEof)
                     && (self.streams.is_server()
-                        || self.error.as_ref().map(|f| f.reason() == Reason::NO_ERROR)
-                            == Some(true))
+                        || self
+                            .error
+                            .as_ref()
+                            .map_or(false, |f| f.reason() == Reason::NO_ERROR))
                 {
                     *self.state = State::Closed(Reason::NO_ERROR, Initiator::Library);
                     return Ok(());
@@ -523,7 +527,9 @@ where
     }
 
     fn recv_frame(&mut self, frame: Option<Frame>) -> Result<ReceivedFrame, Error> {
-        use crate::frame::Frame::*;
+        use crate::frame::Frame::{
+            Data, GoAway, Headers, Ping, Priority, PushPromise, Reset, Settings, WindowUpdate,
+        };
         match frame {
             Some(Headers(frame)) => {
                 tracing::trace!(?frame, "recv HEADERS");

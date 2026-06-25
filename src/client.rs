@@ -163,6 +163,7 @@ pub struct Connection<B: Buf = Bytes> {
 ///
 /// The connection preface and initial `SETTINGS` frame are queued immediately;
 /// call [`Connection::poll_transmit`] to obtain the bytes to write.
+#[must_use]
 pub fn handshake() -> Connection<Bytes> {
     Builder::new().handshake()
 }
@@ -171,6 +172,7 @@ pub fn handshake() -> Connection<Bytes> {
 
 impl Builder {
     /// Returns a new client builder with default configuration values.
+    #[must_use]
     pub fn new() -> Builder {
         Builder {
             max_send_buffer_size: proto::DEFAULT_MAX_SEND_BUFFER_SIZE,
@@ -242,7 +244,7 @@ impl Builder {
 
     /// Sets the maximum send buffer size per stream (in octets).
     pub fn max_send_buffer_size(&mut self, max: usize) -> &mut Self {
-        assert!(max <= u32::MAX as usize);
+        assert!(u32::try_from(max).is_ok());
         self.max_send_buffer_size = max;
         self
     }
@@ -251,6 +253,7 @@ impl Builder {
     ///
     /// The connection preface and initial `SETTINGS` frame are queued; call
     /// [`Connection::poll_transmit`] to obtain the bytes to write.
+    #[must_use]
     pub fn handshake<B: Buf>(&self) -> Connection<B> {
         Connection::new(self.clone())
     }
@@ -534,7 +537,7 @@ impl Peer {
                 version,
                 ..
             },
-            _,
+            (),
         ) = request.into_parts();
 
         let is_connect = method == Method::CONNECT;
@@ -559,13 +562,12 @@ impl Peer {
             if pseudo.authority.is_none() {
                 if version == Version::HTTP_2 {
                     return Err(UserError::MissingUriSchemeAndAuthority.into());
-                } else {
-                    // This is acceptable as per the above comment. However,
-                    // HTTP/2 requires that a scheme is set. Since we are
-                    // forwarding an HTTP 1.1 request, the scheme is set to
-                    // "http".
-                    pseudo.set_scheme(uri::Scheme::HTTP);
                 }
+                // This is acceptable as per the above comment. However,
+                // HTTP/2 requires that a scheme is set. Since we are
+                // forwarding an HTTP 1.1 request, the scheme is set to
+                // "http".
+                pseudo.set_scheme(uri::Scheme::HTTP);
             } else if !is_connect {
                 // TODO: Error
             }
@@ -575,7 +577,7 @@ impl Peer {
         let mut frame = Headers::new(id, pseudo, headers);
 
         if end_of_stream {
-            frame.set_end_stream()
+            frame.set_end_stream();
         }
 
         Ok(frame)

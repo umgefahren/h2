@@ -242,7 +242,7 @@ impl Builder {
 
     /// Sets the maximum send buffer size per stream (in octets).
     pub fn max_send_buffer_size(&mut self, max: usize) -> &mut Self {
-        assert!(max <= std::u32::MAX as usize);
+        assert!(max <= u32::MAX as usize);
         self.max_send_buffer_size = max;
         self
     }
@@ -423,9 +423,8 @@ where
         let ids: Vec<u32> = self.tracked.keys().copied().collect();
         for id in ids {
             loop {
-                let phase = match self.tracked.get(&id) {
-                    Some(t) => t.phase,
-                    None => break,
+                let Some(phase) = self.tracked.get(&id).map(|t| t.phase) else {
+                    break;
                 };
                 match phase {
                     Phase::Head => {

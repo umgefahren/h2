@@ -153,6 +153,9 @@ impl Recv {
     /// Transition the stream state based on receiving headers
     ///
     /// The caller ensures that the frame represents headers and not trailers.
+    // The error carries a (large) `Headers` frame by design so it can be
+    // re-processed; boxing it would pessimize the common Ok path.
+    #[allow(clippy::result_large_err)]
     pub fn recv_headers(
         &mut self,
         frame: frame::Headers,

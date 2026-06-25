@@ -434,9 +434,8 @@ where
         let ids: Vec<u32> = self.tracked.keys().copied().collect();
         for id in ids {
             loop {
-                let phase = match self.tracked.get(&id) {
-                    Some(t) => t.phase,
-                    None => break,
+                let Some(phase) = self.tracked.get(&id).map(|t| t.phase) else {
+                    break;
                 };
                 if phase == Phase::Done {
                     break;

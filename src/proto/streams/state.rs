@@ -5,8 +5,10 @@ use crate::codec::UserError;
 use crate::frame::{self, Reason, StreamId};
 use crate::proto::{self, Error, Initiator, PollReset};
 
-use self::Inner::*;
-use self::Peer::*;
+use self::Inner::{
+    Closed, HalfClosedLocal, HalfClosedRemote, Idle, Open, ReservedLocal, ReservedRemote,
+};
+use self::Peer::{AwaitingHeaders, Streaming};
 
 /// Represents the state of an H2 stream
 ///
@@ -204,7 +206,7 @@ impl State {
         Ok(initial)
     }
 
-    /// Transition from Idle -> ReservedRemote
+    /// Transition from Idle -> `ReservedRemote`
     pub fn reserve_remote(&mut self) -> Result<(), Error> {
         match self.inner {
             Idle => {
@@ -218,7 +220,7 @@ impl State {
         }
     }
 
-    /// Transition from Idle -> ReservedLocal
+    /// Transition from Idle -> `ReservedLocal`
     pub fn reserve_local(&mut self) -> Result<(), UserError> {
         match self.inner {
             Idle => {
@@ -250,10 +252,10 @@ impl State {
         }
     }
 
-    /// The remote explicitly sent a RST_STREAM.
+    /// The remote explicitly sent a `RST_STREAM`.
     ///
     /// # Arguments
-    /// - `frame`: the received RST_STREAM frame.
+    /// - `frame`: the received `RST_STREAM` frame.
     /// - `queued`: true if this stream has frames in the pending send queue.
     pub fn recv_reset(&mut self, frame: frame::Reset, queued: bool) {
         match self.inner {
@@ -291,12 +293,10 @@ impl State {
 
     /// Handle a connection-level error.
     pub fn handle_error(&mut self, err: &proto::Error) {
-        match self.inner {
-            Closed(..) => {}
-            _ => {
-                tracing::trace!("handle_error; err={:?}", err);
-                self.inner = Closed(Cause::Error(err.clone()));
-            }
+        if let Closed(..) = self.inner {
+        } else {
+            tracing::trace!("handle_error; err={:?}", err);
+            self.inner = Closed(Cause::Error(err.clone()));
         }
     }
 
@@ -328,7 +328,7 @@ impl State {
                 tracing::trace!("send_close: HalfClosedRemote => Closed");
                 self.inner = Closed(Cause::EndStream);
             }
-            ref state => panic!("send_close: unexpected state {:?}", state),
+            ref state => panic!("send_close: unexpected state {state:?}"),
         }
     }
 
@@ -445,9 +445,10 @@ impl State {
     /// Returns a reason if the stream has been reset.
     pub(super) fn ensure_reason(&self, mode: PollReset) -> Result<Option<Reason>, crate::Error> {
         match self.inner {
-            Closed(Cause::Error(Error::Reset(_, reason, _)))
-            | Closed(Cause::Error(Error::GoAway(_, reason, _)))
-            | Closed(Cause::ScheduledLibraryReset(reason)) => Ok(Some(reason)),
+            Closed(
+                Cause::Error(Error::Reset(_, reason, _) | Error::GoAway(_, reason, _))
+                | Cause::ScheduledLibraryReset(reason),
+            ) => Ok(Some(reason)),
             Closed(Cause::Error(ref e)) => Err(e.clone().into()),
             Open {
                 local: Streaming, ..

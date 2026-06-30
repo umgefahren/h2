@@ -60,6 +60,7 @@ impl Reason {
     pub const HTTP_1_1_REQUIRED: Reason = Reason(13);
 
     /// Get a string description of the error code.
+    #[must_use]
     pub fn description(&self) -> &str {
         match self.0 {
             0 => "not a result of an error",

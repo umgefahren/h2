@@ -1,9 +1,20 @@
-//! An asynchronous, HTTP/2 server and client implementation.
+//! A sans-I/O HTTP/2 server and client implementation.
 //!
-//! This library implements the [HTTP/2] specification. The implementation is
-//! asynchronous, using [futures] as the basis for the API. The implementation
-//! is also decoupled from TCP or TLS details. The user must handle ALPN and
-//! HTTP/1.1 upgrades themselves.
+//! This library implements the [HTTP/2] specification as a pure state machine.
+//! It performs **no** I/O and contains **no** cryptography: the caller owns the
+//! transport (a plain socket, a kTLS socket, an in-memory pipe, ...) and is
+//! responsible for ALPN, TLS, and HTTP/1.1 upgrades.
+//!
+//! A connection is driven through three primitives:
+//!
+//! * `recv(&[u8])` feeds bytes received from the peer into the state machine.
+//! * `poll_transmit(&mut BytesMut)` drains bytes that must be written to the
+//!   peer.
+//! * `poll_event()` pulls the next protocol event (a request/response, a chunk
+//!   of body data, trailers, a reset, ...).
+//!
+//! See the [`client`] and [`server`] modules for the respective connection
+//! types, and [`SendStream`] for streaming request/response bodies.
 //!
 //! # Getting started
 //!
@@ -11,7 +22,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! h2 = "0.4"
+//! h2-zero = "0.4"
 //! ```
 //!
 //! # Layout
@@ -19,62 +30,48 @@
 //! The crate is split into [`client`] and [`server`] modules. Types that are
 //! common to both clients and servers are located at the root of the crate.
 //!
-//! See module level documentation for more details on how to use `h2`.
+//! See module level documentation for more details on how to use `h2-zero`.
 //!
 //! # Handshake
 //!
-//! Both the client and the server require a connection to already be in a state
-//! ready to start the HTTP/2 handshake. This library does not provide
-//! facilities to do this.
+//! This library assumes the transport is already in a state ready to start the
+//! HTTP/2 handshake; reaching that state (a plaintext connection with prior
+//! knowledge, a TLS connection negotiated via ALPN, or an HTTP/1.1 upgrade) is
+//! the caller's responsibility.
 //!
-//! There are three ways to reach an appropriate state to start the HTTP/2
-//! handshake.
-//!
-//! * Opening an HTTP/1.1 connection and performing an [upgrade].
-//! * Opening a connection with TLS and use ALPN to negotiate the protocol.
-//! * Open a connection with prior knowledge, i.e. both the client and the
-//!   server assume that the connection is immediately ready to start the
-//!   HTTP/2 handshake once opened.
-//!
-//! Once the connection is ready to start the HTTP/2 handshake, it can be
-//! passed to [`server::handshake`] or [`client::handshake`]. At this point, the
-//! library will start the handshake process, which consists of:
+//! A connection is created with [`client::handshake`] or
+//! [`server::handshake`]. The handshake bytes are then exchanged through the
+//! normal `recv` / `poll_transmit` cycle:
 //!
 //! * The client sends the connection preface (a predefined sequence of 24
-//!   octets).
-//! * Both the client and the server sending a SETTINGS frame.
+//!   octets), which the server consumes transparently in `recv`.
+//! * Both the client and the server send a SETTINGS frame.
 //!
-//! See the [Starting HTTP/2] in the specification for more details.
+//! Both of these are queued automatically when the connection is created and
+//! emitted by the first call to `poll_transmit`. See [Starting HTTP/2] in the
+//! specification for more details.
 //!
 //! # Flow control
 //!
-//! [Flow control] is a fundamental feature of HTTP/2. The `h2` library
-//! exposes flow control to the user.
+//! [Flow control] is a fundamental feature of HTTP/2. An endpoint may not send
+//! unlimited data to the peer: each stream has a window size, and a connection
+//! level window governs data across all streams. The peer replenishes a window
+//! by sending `WINDOW_UPDATE` frames.
 //!
-//! An HTTP/2 client or server may not send unlimited data to the peer. When a
-//! stream is initiated, both the client and the server are provided with an
-//! initial window size for that stream.  A window size is the number of bytes
-//! the endpoint can send to the peer. At any point in time, the peer may
-//! increase this window size by sending a `WINDOW_UPDATE` frame. Once a client
-//! or server has sent data filling the window for a stream, no further data may
-//! be sent on that stream until the peer increases the window.
+//! For **outbound** data, [`SendStream`] exposes the current capacity and lets
+//! the caller reserve capacity before sending; if more data is sent than there
+//! is capacity for, the excess is buffered until the peer grants more.
 //!
-//! There is also a **connection level** window governing data sent across all
-//! streams.
-//!
-//! Managing flow control for inbound data is done through [`FlowControl`].
-//! Managing flow control for outbound data is done through [`SendStream`]. See
-//! the struct level documentation for those two types for more details.
+//! For **inbound** data, the library automatically releases stream and
+//! connection capacity as `Data` events are surfaced, replenishing the peer's
+//! window as the application consumes data.
 //!
 //! [HTTP/2]: https://http2.github.io/
-//! [futures]: https://docs.rs/futures/
 //! [`client`]: client/index.html
 //! [`server`]: server/index.html
 //! [Flow control]: http://httpwg.org/specs/rfc7540.html#FlowControl
-//! [`FlowControl`]: struct.FlowControl.html
 //! [`SendStream`]: struct.SendStream.html
 //! [Starting HTTP/2]: http://httpwg.org/specs/rfc7540.html#starting
-//! [upgrade]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Protocol_upgrade_mechanism
 //! [`server::handshake`]: server/fn.handshake.html
 //! [`client::handshake`]: client/fn.handshake.html
 
@@ -85,6 +82,10 @@
     clippy::undocumented_unsafe_blocks
 )]
 #![allow(clippy::type_complexity, clippy::manual_range_contains)]
+// The sans-I/O rewrite retains internal protocol machinery (push promises,
+// informational responses, user pings, ...) that is not yet surfaced by the
+// event-based public API. Keep it around rather than deleting working code.
+#![allow(dead_code)]
 #![cfg_attr(test, deny(warnings))]
 
 macro_rules! proto_err {
@@ -134,7 +135,7 @@ mod share;
 pub mod fuzz_bridge;
 
 pub use crate::error::{Error, Reason};
-pub use crate::share::{FlowControl, Ping, PingPong, Pong, RecvStream, SendStream, StreamId};
+pub use crate::share::{SendStream, StreamId};
 
 #[cfg(feature = "unstable")]
 pub use codec::{Codec, SendError, UserError};
@@ -142,6 +143,7 @@ pub use codec::{Codec, SendError, UserError};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::task::{RawWaker, RawWakerVTable, Waker};
 
 /// Creates a future from a function that returns `Poll`.
 fn poll_fn<T, F: FnMut(&mut Context<'_>) -> T>(f: F) -> PollFn<F> {
@@ -159,4 +161,19 @@ impl<T, F: FnMut(&mut Context<'_>) -> Poll<T>> Future for PollFn<F> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         (self.0)(cx)
     }
+}
+
+/// Returns a `Waker` that does nothing when woken.
+///
+/// The sans-I/O state machine is driven synchronously: callers feed bytes in,
+/// pull bytes out, and pull protocol events out. Internally the protocol logic
+/// is still structured around `Poll`, so we hand it a waker that never needs to
+/// schedule anything — `Poll::Pending` simply means "no further progress can be
+/// made until more input arrives".
+fn noop_waker() -> Waker {
+    const VTABLE: RawWakerVTable = RawWakerVTable::new(|_| RAW, |_| {}, |_| {}, |_| {});
+    const RAW: RawWaker = RawWaker::new(std::ptr::null(), &VTABLE);
+    // SAFETY: the vtable functions are all no-ops that ignore the (null) data
+    // pointer, so the resulting `Waker` is sound to use and clone.
+    unsafe { Waker::from_raw(RAW) }
 }

@@ -7,7 +7,6 @@ use crate::frame::{self, Reason};
 use crate::proto::{self, Error, Initiator};
 
 use bytes::Buf;
-use tokio::io::AsyncWrite;
 
 use std::cmp::Ordering;
 use std::io;
@@ -199,7 +198,7 @@ impl Send {
         Ok(())
     }
 
-    /// Send an explicit RST_STREAM frame
+    /// Send an explicit `RST_STREAM` frame
     pub fn send_reset<B>(
         &mut self,
         reason: Reason,
@@ -334,16 +333,15 @@ impl Send {
         Ok(())
     }
 
-    pub fn poll_complete<T, B>(
+    pub fn poll_complete<B>(
         &mut self,
         cx: &mut Context,
         buffer: &mut Buffer<Frame<B>>,
         store: &mut Store,
         counts: &mut Counts,
-        dst: &mut Codec<T, Prioritized<B>>,
+        dst: &mut Codec<Prioritized<B>>,
     ) -> Poll<io::Result<()>>
     where
-        T: AsyncWrite + Unpin,
         B: Buf,
     {
         self.prioritize
@@ -357,7 +355,7 @@ impl Send {
         stream: &mut store::Ptr,
         counts: &mut Counts,
     ) {
-        self.prioritize.reserve_capacity(capacity, stream, counts)
+        self.prioritize.reserve_capacity(capacity, stream, counts);
     }
 
     pub fn poll_capacity(
@@ -399,12 +397,11 @@ impl Send {
         stream: &mut Stream,
         mode: PollReset,
     ) -> Poll<Result<Reason, crate::Error>> {
-        match stream.state.ensure_reason(mode)? {
-            Some(reason) => Poll::Ready(Ok(reason)),
-            None => {
-                stream.wait_send(cx);
-                Poll::Pending
-            }
+        if let Some(reason) = stream.state.ensure_reason(mode)? {
+            Poll::Ready(Ok(reason))
+        } else {
+            stream.wait_send(cx);
+            Poll::Pending
         }
     }
 
@@ -593,7 +590,7 @@ impl Send {
         }
 
         if let Some(val) = settings.is_push_enabled() {
-            self.is_push_enabled = val
+            self.is_push_enabled = val;
         }
 
         Ok(())

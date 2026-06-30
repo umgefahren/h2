@@ -24,11 +24,11 @@ pub struct Error {
 
 #[derive(Debug)]
 enum Kind {
-    /// A RST_STREAM frame was received or sent.
+    /// A `RST_STREAM` frame was received or sent.
     #[allow(dead_code)]
     Reset(StreamId, Reason, Initiator),
 
-    /// A GO_AWAY frame was received or sent.
+    /// A `GO_AWAY` frame was received or sent.
     GoAway(Bytes, Reason, Initiator),
 
     /// The user created an error from a bare Reason.
@@ -58,12 +58,12 @@ impl Error {
         }
     }
 
-    /// Returns true if the error is an io::Error
+    /// Returns true if the error is an `io::Error`
     pub fn is_io(&self) -> bool {
         matches!(self.kind, Kind::Io(..))
     }
 
-    /// Returns the error if the error is an io::Error
+    /// Returns the error if the error is an `io::Error`
     pub fn get_io(&self) -> Option<&io::Error> {
         match self.kind {
             Kind::Io(ref e) => Some(e),
@@ -71,7 +71,7 @@ impl Error {
         }
     }
 
-    /// Returns the error if the error is an io::Error
+    /// Returns the error if the error is an `io::Error`
     pub fn into_io(self) -> Option<io::Error> {
         match self.kind {
             Kind::Io(e) => Some(e),
@@ -107,7 +107,7 @@ impl Error {
 
     /// Returns true if the error was created by `h2`.
     ///
-    /// Such as noticing some protocol error and sending a GOAWAY or RST_STREAM.
+    /// Such as noticing some protocol error and sending a GOAWAY or `RST_STREAM`.
     pub fn is_library(&self) -> bool {
         matches!(
             self.kind,
@@ -118,7 +118,7 @@ impl Error {
 
 impl From<proto::Error> for Error {
     fn from(src: proto::Error) -> Error {
-        use crate::proto::Error::*;
+        use crate::proto::Error::{GoAway, Io, Reset};
 
         Error {
             kind: match src {
@@ -163,33 +163,33 @@ impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         let debug_data = match self.kind {
             Kind::Reset(_, reason, Initiator::User) => {
-                return write!(fmt, "stream error sent by user: {}", reason)
+                return write!(fmt, "stream error sent by user: {reason}")
             }
             Kind::Reset(_, reason, Initiator::Library) => {
-                return write!(fmt, "stream error detected: {}", reason)
+                return write!(fmt, "stream error detected: {reason}")
             }
             Kind::Reset(_, reason, Initiator::Remote) => {
-                return write!(fmt, "stream error received: {}", reason)
+                return write!(fmt, "stream error received: {reason}")
             }
             Kind::GoAway(ref debug_data, reason, Initiator::User) => {
-                write!(fmt, "connection error sent by user: {}", reason)?;
+                write!(fmt, "connection error sent by user: {reason}")?;
                 debug_data
             }
             Kind::GoAway(ref debug_data, reason, Initiator::Library) => {
-                write!(fmt, "connection error detected: {}", reason)?;
+                write!(fmt, "connection error detected: {reason}")?;
                 debug_data
             }
             Kind::GoAway(ref debug_data, reason, Initiator::Remote) => {
-                write!(fmt, "connection error received: {}", reason)?;
+                write!(fmt, "connection error received: {reason}")?;
                 debug_data
             }
-            Kind::Reason(reason) => return write!(fmt, "protocol error: {}", reason),
-            Kind::User(ref e) => return write!(fmt, "user error: {}", e),
+            Kind::Reason(reason) => return write!(fmt, "protocol error: {reason}"),
+            Kind::User(ref e) => return write!(fmt, "user error: {e}"),
             Kind::Io(ref e) => return e.fmt(fmt),
         };
 
         if !debug_data.is_empty() {
-            write!(fmt, " ({:?})", debug_data)?;
+            write!(fmt, " ({debug_data:?})")?;
         }
 
         Ok(())

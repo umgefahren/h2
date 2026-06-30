@@ -6,24 +6,23 @@ use crate::proto::Error;
 
 use crate::hpack;
 
-use futures_core::Stream;
-
 use bytes::{Buf, BytesMut};
-
-use std::io;
-
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use tokio::io::AsyncRead;
-use tokio_util::codec::FramedRead as InnerFramedRead;
-use tokio_util::codec::{LengthDelimitedCodec, LengthDelimitedCodecError};
 
 // 16 MB "sane default" taken from golang http2
 const DEFAULT_SETTINGS_MAX_HEADER_LIST_SIZE: usize = 16 << 20;
 
+/// Decodes HTTP/2 frames from an in-memory byte buffer.
+///
+/// This type is fully sans-I/O: received bytes are appended with
+/// [`FramedRead::recv`] and decoded frames are pulled out with
+/// [`FramedRead::next_frame`]. There is no underlying socket.
 #[derive(Debug)]
-pub struct FramedRead<T> {
-    inner: InnerFramedRead<T, LengthDelimitedCodec>,
+pub struct FramedRead {
+    /// Accumulated, not-yet-decoded bytes received from the peer.
+    buffer: BytesMut,
+
+    /// Largest frame payload accepted from the wire.
+    max_frame_size: usize,
 
     // hpack decoder state
     hpack: hpack::Decoder,
@@ -53,13 +52,15 @@ enum Continuable {
     PushPromise(frame::PushPromise),
 }
 
-impl<T> FramedRead<T> {
-    pub fn new(inner: InnerFramedRead<T, LengthDelimitedCodec>) -> FramedRead<T> {
+impl FramedRead {
+    pub fn new() -> FramedRead {
         let max_header_list_size = DEFAULT_SETTINGS_MAX_HEADER_LIST_SIZE;
+        let max_frame_size = DEFAULT_MAX_FRAME_SIZE as usize;
         let max_continuation_frames =
-            calc_max_continuation_frames(max_header_list_size, inner.decoder().max_frame_length());
+            calc_max_continuation_frames(max_header_list_size, max_frame_size);
         FramedRead {
-            inner,
+            buffer: BytesMut::new(),
+            max_frame_size,
             hpack: hpack::Decoder::new(DEFAULT_SETTINGS_HEADER_TABLE_SIZE),
             max_header_list_size,
             max_continuation_frames,
@@ -67,18 +68,69 @@ impl<T> FramedRead<T> {
         }
     }
 
-    pub fn get_ref(&self) -> &T {
-        self.inner.get_ref()
+    /// Append received bytes to the decode buffer.
+    pub fn recv(&mut self, src: &[u8]) {
+        self.buffer.extend_from_slice(src);
     }
 
-    pub fn get_mut(&mut self) -> &mut T {
-        self.inner.get_mut()
+    /// Attempt to decode the next frame from the buffer.
+    ///
+    /// Returns `Ok(None)` when more bytes are required to complete the next
+    /// frame.
+    pub fn next_frame(&mut self) -> Result<Option<Frame>, Error> {
+        let span = tracing::trace_span!("FramedRead::next_frame");
+        let _e = span.enter();
+        loop {
+            // Need at least the frame header to determine the length.
+            if self.buffer.len() < frame::HEADER_LEN {
+                return Ok(None);
+            }
+
+            // The frame length is the first 3 bytes (big endian), covering only
+            // the payload (the 9 byte header is not included).
+            let payload_len = (usize::from(self.buffer[0]) << 16)
+                | (usize::from(self.buffer[1]) << 8)
+                | usize::from(self.buffer[2]);
+
+            // Reject frames whose payload exceeds the negotiated max frame size.
+            if payload_len > self.max_frame_size {
+                return Err(Error::library_go_away(Reason::FRAME_SIZE_ERROR));
+            }
+
+            let frame_len = frame::HEADER_LEN + payload_len;
+            if self.buffer.len() < frame_len {
+                return Ok(None);
+            }
+
+            let bytes = self.buffer.split_to(frame_len);
+            tracing::trace!(read.bytes = bytes.len());
+
+            let Self {
+                ref mut hpack,
+                max_header_list_size,
+                ref mut partial,
+                max_continuation_frames,
+                ..
+            } = *self;
+            if let Some(frame) = decode_frame(
+                hpack,
+                max_header_list_size,
+                max_continuation_frames,
+                partial,
+                bytes,
+            )? {
+                tracing::debug!(?frame, "received");
+                return Ok(Some(frame));
+            }
+            // Frame consumed but produced no output (partial header block or
+            // unknown frame); try to decode the next one.
+        }
     }
 
     /// Returns the current max frame size setting
     #[inline]
     pub fn max_frame_size(&self) -> usize {
-        self.inner.decoder().max_frame_length()
+        self.max_frame_size
     }
 
     /// Updates the max frame size setting.
@@ -87,7 +139,7 @@ impl<T> FramedRead<T> {
     #[inline]
     pub fn set_max_frame_size(&mut self, val: usize) {
         assert!(DEFAULT_MAX_FRAME_SIZE as usize <= val && val <= MAX_MAX_FRAME_SIZE as usize);
-        self.inner.decoder_mut().set_max_frame_length(val);
+        self.max_frame_size = val;
         // Update max CONTINUATION frames too, since its based on this
         self.max_continuation_frames = calc_max_continuation_frames(self.max_header_list_size, val);
     }
@@ -287,12 +339,11 @@ fn decode_frame(
         Kind::Continuation => {
             let is_end_headers = (head.flag() & 0x4) == 0x4;
 
-            let mut partial = match partial_inout.take() {
-                Some(partial) => partial,
-                None => {
-                    proto_err!(conn: "received unexpected CONTINUATION frame");
-                    return Err(Error::library_go_away(Reason::PROTOCOL_ERROR));
-                }
+            let mut partial = if let Some(partial) = partial_inout.take() {
+                partial
+            } else {
+                proto_err!(conn: "received unexpected CONTINUATION frame");
+                return Err(Error::library_go_away(Reason::PROTOCOL_ERROR));
             };
 
             // The stream identifiers must match
@@ -312,9 +363,8 @@ fn decode_frame(
                         Reason::ENHANCE_YOUR_CALM,
                         "too_many_continuations",
                     ));
-                } else {
-                    partial.continuation_frames_count = cnt;
                 }
+                partial.continuation_frames_count = cnt;
             }
 
             // Extend the buf
@@ -347,7 +397,7 @@ fn decode_frame(
                 .frame
                 .load_hpack(&mut partial.buf, max_header_list_size, hpack)
             {
-                Ok(_) => {}
+                Ok(()) => {}
                 Err(frame::Error::Hpack(hpack::DecoderError::NeedMore(_))) if !is_end_headers => {}
                 Err(frame::Error::MalformedMessage) => {
                     let id = head.stream_id();
@@ -383,54 +433,10 @@ fn decode_frame(
     Ok(Some(frame))
 }
 
-impl<T> Stream for FramedRead<T>
-where
-    T: AsyncRead + Unpin,
-{
-    type Item = Result<Frame, Error>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let span = tracing::trace_span!("FramedRead::poll_next");
-        let _e = span.enter();
-        loop {
-            tracing::trace!("poll");
-            let bytes = match ready!(Pin::new(&mut self.inner).poll_next(cx)) {
-                Some(Ok(bytes)) => bytes,
-                Some(Err(e)) => return Poll::Ready(Some(Err(map_err(e)))),
-                None => return Poll::Ready(None),
-            };
-
-            tracing::trace!(read.bytes = bytes.len());
-            let Self {
-                ref mut hpack,
-                max_header_list_size,
-                ref mut partial,
-                max_continuation_frames,
-                ..
-            } = *self;
-            if let Some(frame) = decode_frame(
-                hpack,
-                max_header_list_size,
-                max_continuation_frames,
-                partial,
-                bytes,
-            )? {
-                tracing::debug!(?frame, "received");
-                return Poll::Ready(Some(Ok(frame)));
-            }
-        }
+impl Default for FramedRead {
+    fn default() -> Self {
+        Self::new()
     }
-}
-
-fn map_err(err: io::Error) -> Error {
-    if let io::ErrorKind::InvalidData = err.kind() {
-        if let Some(custom) = err.get_ref() {
-            if custom.is::<LengthDelimitedCodecError>() {
-                return Error::library_go_away(Reason::FRAME_SIZE_ERROR);
-            }
-        }
-    }
-    err.into()
 }
 
 // ===== impl Continuable =====

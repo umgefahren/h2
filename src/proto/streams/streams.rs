@@ -10,7 +10,6 @@ use crate::{client, proto, server};
 use bytes::{Buf, Bytes};
 use http::{HeaderMap, Request, Response};
 use std::task::{Context, Poll, Waker};
-use tokio::io::AsyncWrite;
 
 use std::sync::{Arc, Mutex};
 use std::{fmt, io};
@@ -91,7 +90,7 @@ struct Actions {
     /// Task that calls `poll_complete`.
     task: Option<Waker>,
 
-    /// If the connection errors, a copy is kept for any StreamRefs.
+    /// If the connection errors, a copy is kept for any `StreamRefs`.
     conn_error: Option<proto::Error>,
 }
 
@@ -153,14 +152,11 @@ where
         })
     }
 
-    pub fn send_pending_refusal<T>(
+    pub fn send_pending_refusal(
         &mut self,
         cx: &mut Context,
-        dst: &mut Codec<T, Prioritized<B>>,
-    ) -> Poll<io::Result<()>>
-    where
-        T: AsyncWrite + Unpin,
-    {
+        dst: &mut Codec<Prioritized<B>>,
+    ) -> Poll<io::Result<()>> {
         let mut me = self.inner.lock().unwrap();
         let me = &mut *me;
         me.actions.recv.send_pending_refusal(cx, dst)
@@ -174,14 +170,11 @@ where
             .clear_expired_reset_streams(&mut me.store, &mut me.counts);
     }
 
-    pub fn poll_complete<T>(
+    pub fn poll_complete(
         &mut self,
         cx: &mut Context,
-        dst: &mut Codec<T, Prioritized<B>>,
-    ) -> Poll<io::Result<()>>
-    where
-        T: AsyncWrite + Unpin,
-    {
+        dst: &mut Codec<Prioritized<B>>,
+    ) -> Poll<io::Result<()>> {
         let mut me = self.inner.lock().unwrap();
         me.poll_complete(&self.send_buffer, cx, dst)
     }
@@ -549,43 +542,42 @@ impl Inner {
     ) -> Result<(), Error> {
         let id = frame.stream_id();
 
-        let stream = match self.store.find_mut(&id) {
-            Some(stream) => stream,
-            None => {
-                // The GOAWAY process has begun. All streams with a greater ID
-                // than specified as part of GOAWAY should be ignored.
-                if id > self.actions.recv.max_stream_id() {
-                    tracing::trace!(
-                        "id ({:?}) > max_stream_id ({:?}), ignoring DATA",
-                        id,
-                        self.actions.recv.max_stream_id()
-                    );
+        let stream = if let Some(stream) = self.store.find_mut(&id) {
+            stream
+        } else {
+            // The GOAWAY process has begun. All streams with a greater ID
+            // than specified as part of GOAWAY should be ignored.
+            if id > self.actions.recv.max_stream_id() {
+                tracing::trace!(
+                    "id ({:?}) > max_stream_id ({:?}), ignoring DATA",
+                    id,
+                    self.actions.recv.max_stream_id()
+                );
 
-                    // We still need to account for connection-level flow control.
-                    let sz = frame.flow_controlled_len();
-                    assert!(sz <= super::MAX_WINDOW_SIZE as usize);
-                    let sz = sz as WindowSize;
-                    self.actions.recv.ignore_data(sz)?;
+                // We still need to account for connection-level flow control.
+                let sz = frame.flow_controlled_len();
+                assert!(sz <= super::MAX_WINDOW_SIZE as usize);
+                let sz = sz as WindowSize;
+                self.actions.recv.ignore_data(sz)?;
 
-                    return Ok(());
-                }
-
-                if self.actions.may_have_forgotten_stream(peer, id) {
-                    tracing::debug!("recv_data for old stream={:?}, sending STREAM_CLOSED", id,);
-
-                    let sz = frame.flow_controlled_len();
-                    // This should have been enforced at the codec::FramedRead layer, so
-                    // this is just a sanity check.
-                    assert!(sz <= super::MAX_WINDOW_SIZE as usize);
-                    let sz = sz as WindowSize;
-                    self.actions.recv.ignore_data(sz)?;
-
-                    return Err(Error::library_reset(id, Reason::STREAM_CLOSED));
-                }
-
-                proto_err!(conn: "recv_data: stream not found; id={:?}", id);
-                return Err(Error::library_go_away(Reason::PROTOCOL_ERROR));
+                return Ok(());
             }
+
+            if self.actions.may_have_forgotten_stream(peer, id) {
+                tracing::debug!("recv_data for old stream={:?}, sending STREAM_CLOSED", id,);
+
+                let sz = frame.flow_controlled_len();
+                // This should have been enforced at the codec::FramedRead layer, so
+                // this is just a sanity check.
+                assert!(sz <= super::MAX_WINDOW_SIZE as usize);
+                let sz = sz as WindowSize;
+                self.actions.recv.ignore_data(sz)?;
+
+                return Err(Error::library_reset(id, Reason::STREAM_CLOSED));
+            }
+
+            proto_err!(conn: "recv_data: stream not found; id={:?}", id);
+            return Err(Error::library_go_away(Reason::PROTOCOL_ERROR));
         };
 
         let actions = &mut self.actions;
@@ -631,16 +623,15 @@ impl Inner {
             return Ok(());
         }
 
-        let stream = match self.store.find_mut(&id) {
-            Some(stream) => stream,
-            None => {
-                // TODO: Are there other error cases?
-                self.actions
-                    .ensure_not_idle(self.counts.peer(), id)
-                    .map_err(Error::library_go_away)?;
+        let stream = if let Some(stream) = self.store.find_mut(&id) {
+            stream
+        } else {
+            // TODO: Are there other error cases?
+            self.actions
+                .ensure_not_idle(self.counts.peer(), id)
+                .map_err(Error::library_go_away)?;
 
-                return Ok(());
-            }
+            return Ok(());
         };
 
         if stream.is_pending_open {
@@ -703,11 +694,10 @@ impl Inner {
                     &mut self.counts,
                     res,
                 );
-            } else {
-                self.actions
-                    .ensure_not_idle(self.counts.peer(), id)
-                    .map_err(Error::library_go_away)?;
             }
+            self.actions
+                .ensure_not_idle(self.counts.peer(), id)
+                .map_err(Error::library_go_away)?;
         }
 
         Ok(())
@@ -725,7 +715,7 @@ impl Inner {
             counts.transition(stream, |counts, stream| {
                 actions.recv.handle_error(&err, &mut *stream);
                 actions.send.handle_error(send_buffer, stream, counts);
-            })
+            });
         });
 
         actions.conn_error = Some(err);
@@ -755,7 +745,7 @@ impl Inner {
                 counts.transition(stream, |counts, stream| {
                     actions.recv.handle_error(&err, &mut *stream);
                     actions.send.handle_error(send_buffer, stream, counts);
-                })
+                });
             }
         });
 
@@ -773,31 +763,28 @@ impl Inner {
         let promised_id = frame.promised_id();
 
         // First, ensure that the initiating stream is still in a valid state.
-        let parent_key = match self.store.find_mut(&id) {
-            Some(stream) => {
-                // The GOAWAY process has begun. All streams with a greater ID
-                // than specified as part of GOAWAY should be ignored.
-                if id > self.actions.recv.max_stream_id() {
-                    tracing::trace!(
-                        "id ({:?}) > max_stream_id ({:?}), ignoring PUSH_PROMISE",
-                        id,
-                        self.actions.recv.max_stream_id()
-                    );
-                    return Ok(());
-                }
-
-                // The stream must be receive open
-                if !stream.state.ensure_recv_open()? {
-                    proto_err!(conn: "recv_push_promise: initiating stream is not opened");
-                    return Err(Error::library_go_away(Reason::PROTOCOL_ERROR));
-                }
-
-                stream.key()
+        let parent_key = if let Some(stream) = self.store.find_mut(&id) {
+            // The GOAWAY process has begun. All streams with a greater ID
+            // than specified as part of GOAWAY should be ignored.
+            if id > self.actions.recv.max_stream_id() {
+                tracing::trace!(
+                    "id ({:?}) > max_stream_id ({:?}), ignoring PUSH_PROMISE",
+                    id,
+                    self.actions.recv.max_stream_id()
+                );
+                return Ok(());
             }
-            None => {
-                proto_err!(conn: "recv_push_promise: initiating stream is in an invalid state");
+
+            // The stream must be receive open
+            if !stream.state.ensure_recv_open()? {
+                proto_err!(conn: "recv_push_promise: initiating stream is not opened");
                 return Err(Error::library_go_away(Reason::PROTOCOL_ERROR));
             }
+
+            stream.key()
+        } else {
+            proto_err!(conn: "recv_push_promise: initiating stream is in an invalid state");
+            return Err(Error::library_go_away(Reason::PROTOCOL_ERROR));
         };
 
         // TODO: Streams in the reserved states do not count towards the concurrency
@@ -837,19 +824,13 @@ impl Inner {
             self.counts.transition(stream, |counts, stream| {
                 let stream_valid = actions.recv.recv_push_promise(frame, stream);
 
-                match stream_valid {
-                    Ok(()) => Ok(Some(stream.key())),
-                    _ => {
-                        let mut send_buffer = send_buffer.inner.lock().unwrap();
-                        actions
-                            .reset_on_recv_stream_err(
-                                &mut *send_buffer,
-                                stream,
-                                counts,
-                                stream_valid,
-                            )
-                            .map(|()| None)
-                    }
+                if let Ok(()) = stream_valid {
+                    Ok(Some(stream.key()))
+                } else {
+                    let mut send_buffer = send_buffer.inner.lock().unwrap();
+                    actions
+                        .reset_on_recv_stream_err(&mut *send_buffer, stream, counts, stream_valid)
+                        .map(|()| None)
                 }
             })?
         };
@@ -861,7 +842,7 @@ impl Inner {
             let parent = &mut self.store.resolve(parent_key);
             parent.pending_push_promises = ppp;
             parent.notify_push();
-        };
+        }
 
         Ok(())
     }
@@ -895,21 +876,20 @@ impl Inner {
                 // This handles resetting send state associated with the
                 // stream
                 actions.send.handle_error(send_buffer, stream, counts);
-            })
+            });
         });
 
         actions.clear_queues(clear_pending_accept, &mut self.store, counts);
         Ok(())
     }
 
-    fn poll_complete<T, B>(
+    fn poll_complete<B>(
         &mut self,
         send_buffer: &SendBuffer<B>,
         cx: &mut Context,
-        dst: &mut Codec<T, Prioritized<B>>,
+        dst: &mut Codec<Prioritized<B>>,
     ) -> Poll<io::Result<()>>
     where
-        T: AsyncWrite + Unpin,
         B: Buf,
     {
         let mut send_buffer = send_buffer.inner.lock().unwrap();
@@ -1320,7 +1300,7 @@ impl<B> StreamRef<B> {
 
         me.actions
             .send
-            .reserve_capacity(capacity, &mut stream, &mut me.counts)
+            .reserve_capacity(capacity, &mut stream, &mut me.counts);
     }
 
     /// Returns the stream's current send capacity.
@@ -1471,7 +1451,7 @@ impl OpaqueStreamRef {
     }
 
     /// Releases recv capacity back to the peer. This may result in sending
-    /// WINDOW_UPDATE frames on both the stream and connection.
+    /// `WINDOW_UPDATE` frames on both the stream and connection.
     pub fn release_capacity(&mut self, capacity: WindowSize) -> Result<(), UserError> {
         let mut me = self.inner.lock().unwrap();
         let me = &mut *me;
@@ -1500,7 +1480,7 @@ impl OpaqueStreamRef {
 
 impl fmt::Debug for OpaqueStreamRef {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        use std::sync::TryLockError::*;
+        use std::sync::TryLockError::{Poisoned, WouldBlock};
 
         match self.inner.try_lock() {
             Ok(me) => {
@@ -1544,16 +1524,14 @@ impl Drop for OpaqueStreamRef {
 
 // TODO: Move back in fn above
 fn drop_stream_ref(inner: &Mutex<Inner>, key: store::Key) {
-    let mut me = match inner.lock() {
-        Ok(inner) => inner,
-        Err(_) => {
-            if ::std::thread::panicking() {
-                tracing::trace!("StreamRef::drop; mutex poisoned");
-                return;
-            } else {
-                panic!("StreamRef::drop; mutex poisoned");
-            }
+    let mut me = if let Ok(inner) = inner.lock() {
+        inner
+    } else {
+        if ::std::thread::panicking() {
+            tracing::trace!("StreamRef::drop; mutex poisoned");
+            return;
         }
+        panic!("StreamRef::drop; mutex poisoned");
     };
 
     let me = &mut *me;
@@ -1729,13 +1707,13 @@ impl Actions {
 
     /// Check if we possibly could have processed and since forgotten this stream.
     ///
-    /// If we send a RST_STREAM for a stream, we will eventually "forget" about
+    /// If we send a `RST_STREAM` for a stream, we will eventually "forget" about
     /// the stream to free up memory. It's possible that the remote peer had
     /// frames in-flight, and by the time we receive them, our own state is
     /// gone. We *could* tear everything down by sending a GOAWAY, but it
     /// is more likely to be latency/memory constraints that caused this,
     /// and not a bad actor. So be less catastrophic, the spec allows
-    /// us to send another RST_STREAM of STREAM_CLOSED.
+    /// us to send another `RST_STREAM` of `STREAM_CLOSED`.
     fn may_have_forgotten_stream(&self, peer: peer::Dyn, id: StreamId) -> bool {
         if id.is_zero() {
             return false;

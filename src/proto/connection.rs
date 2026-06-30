@@ -3,25 +3,25 @@ use crate::frame::{Reason, StreamId};
 use crate::{client, server};
 
 use crate::frame::DEFAULT_INITIAL_WINDOW_SIZE;
-use crate::proto::*;
+use crate::proto::{
+    frame, streams, Buf, Codec, DynStreams, Error, Frame, GoAway, Initiator, Peer, PingPong,
+    Prioritized, Settings, StreamRef, Streams, UserPings, WindowSize,
+};
 
-use bytes::Bytes;
-use futures_core::Stream;
+use bytes::{Bytes, BytesMut};
 use std::io;
 use std::marker::PhantomData;
-use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use tokio::io::AsyncRead;
 
 /// An H2 connection
 #[derive(Debug)]
-pub(crate) struct Connection<T, P, B: Buf = Bytes>
+pub(crate) struct Connection<P, B: Buf = Bytes>
 where
     P: Peer,
 {
     /// Read / write frame values
-    codec: Codec<T, Prioritized<B>>,
+    codec: Codec<Prioritized<B>>,
 
     inner: ConnectionInner<P, B>,
 }
@@ -97,13 +97,12 @@ enum State {
     Closed(Reason, Initiator),
 }
 
-impl<T, P, B> Connection<T, P, B>
+impl<P, B> Connection<P, B>
 where
-    T: AsyncRead + AsyncWrite + Unpin,
     P: Peer,
     B: Buf,
 {
-    pub fn new(codec: Codec<T, Prioritized<B>>, config: Config) -> Connection<T, P, B> {
+    pub fn new(codec: Codec<Prioritized<B>>, config: Config) -> Connection<P, B> {
         fn streams_config(config: &Config) -> streams::Config {
             streams::Config {
                 initial_max_send_streams: config.initial_max_send_streams,
@@ -141,6 +140,17 @@ where
                 _phantom: PhantomData,
             },
         }
+    }
+
+    /// Feed bytes received from the peer into the frame decoder.
+    pub(crate) fn recv_bytes(&mut self, src: &[u8]) {
+        self.codec.recv(src);
+    }
+
+    /// Drain any encoded wire bytes that are ready to send into `dst`,
+    /// returning the number of bytes written.
+    pub(crate) fn poll_transmit(&mut self, dst: &mut BytesMut) -> usize {
+        self.codec.flush_into(dst)
     }
 
     /// connection flow control
@@ -210,7 +220,7 @@ where
     }
 
     pub fn go_away_from_user(&mut self, e: Reason) {
-        self.inner.as_dyn().go_away_from_user(e)
+        self.inner.as_dyn().go_away_from_user(e);
     }
 
     fn take_error(&mut self, ours: Reason, initiator: Initiator) -> Result<(), Error> {
@@ -298,7 +308,7 @@ where
                         }
                     };
 
-                    self.inner.as_dyn().handle_poll2_result(result)?
+                    self.inner.as_dyn().handle_poll2_result(result)?;
                 }
                 State::Closing(reason, initiator) => {
                     tracing::trace!("connection closing after flush");
@@ -333,9 +343,8 @@ where
                         // A user initiated abrupt shutdown shouldn't return
                         // the same error back to the user.
                         return Poll::Ready(Ok(()));
-                    } else {
-                        return Poll::Ready(Err(Error::library_go_away(reason)));
                     }
+                    return Poll::Ready(Err(Error::library_go_away(reason)));
                 }
                 // Only NO_ERROR should be waiting for idle
                 debug_assert_eq!(
@@ -349,7 +358,7 @@ where
             match self
                 .inner
                 .as_dyn()
-                .recv_frame(ready!(Pin::new(&mut self.codec).poll_next(cx)?))?
+                .recv_frame(ready!(self.codec.poll_next(cx)?))?
             {
                 ReceivedFrame::Settings(frame) => {
                     self.inner.settings.recv_settings(
@@ -481,8 +490,10 @@ where
                 if self.streams.is_buffer_empty()
                     && matches!(kind, io::ErrorKind::UnexpectedEof)
                     && (self.streams.is_server()
-                        || self.error.as_ref().map(|f| f.reason() == Reason::NO_ERROR)
-                            == Some(true))
+                        || self
+                            .error
+                            .as_ref()
+                            .map_or(false, |f| f.reason() == Reason::NO_ERROR))
                 {
                     *self.state = State::Closed(Reason::NO_ERROR, Initiator::Library);
                     return Ok(());
@@ -516,7 +527,9 @@ where
     }
 
     fn recv_frame(&mut self, frame: Option<Frame>) -> Result<ReceivedFrame, Error> {
-        use crate::frame::Frame::*;
+        use crate::frame::Frame::{
+            Data, GoAway, Headers, Ping, Priority, PushPromise, Reset, Settings, WindowUpdate,
+        };
         match frame {
             Some(Headers(frame)) => {
                 tracing::trace!(?frame, "recv HEADERS");
@@ -584,9 +597,8 @@ enum ReceivedFrame {
     Done,
 }
 
-impl<T, B> Connection<T, client::Peer, B>
+impl<B> Connection<client::Peer, B>
 where
-    T: AsyncRead + AsyncWrite,
     B: Buf,
 {
     pub(crate) fn streams(&self) -> &Streams<B, client::Peer> {
@@ -594,9 +606,8 @@ where
     }
 }
 
-impl<T, B> Connection<T, server::Peer, B>
+impl<B> Connection<server::Peer, B>
 where
-    T: AsyncRead + AsyncWrite + Unpin,
     B: Buf,
 {
     pub fn next_incoming(&mut self) -> Option<StreamRef<B>> {
@@ -629,7 +640,7 @@ where
     }
 }
 
-impl<T, P, B> Drop for Connection<T, P, B>
+impl<P, B> Drop for Connection<P, B>
 where
     P: Peer,
     B: Buf,

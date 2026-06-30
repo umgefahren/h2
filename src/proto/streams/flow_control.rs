@@ -30,10 +30,10 @@ fn sanity_unclaimed_ratio() {
 pub struct FlowControl {
     /// Window the peer knows about.
     ///
-    /// This can go negative if a SETTINGS_INITIAL_WINDOW_SIZE is received.
+    /// This can go negative if a `SETTINGS_INITIAL_WINDOW_SIZE` is received.
     ///
     /// For example, say the peer sends a request and uses 32kb of the window.
-    /// We send a SETTINGS_INITIAL_WINDOW_SIZE of 16kb. The peer has to adjust
+    /// We send a `SETTINGS_INITIAL_WINDOW_SIZE` of 16kb. The peer has to adjust
     /// its understanding of the capacity of the window, and that would be:
     ///
     /// ```notrust
@@ -83,13 +83,13 @@ impl FlowControl {
         self.available.increase_by(capacity)
     }
 
-    /// If a WINDOW_UPDATE frame should be sent, returns a positive number
+    /// If a `WINDOW_UPDATE` frame should be sent, returns a positive number
     /// representing the increment to be used.
     ///
     /// If there is no available bytes to be reclaimed, or the number of
     /// available bytes does not reach the threshold, this returns `None`.
     ///
-    /// This represents pending outbound WINDOW_UPDATE frames.
+    /// This represents pending outbound `WINDOW_UPDATE` frames.
     pub fn unclaimed_capacity(&self) -> Option<WindowSize> {
         let available = self.available;
 
@@ -109,7 +109,7 @@ impl FlowControl {
 
     /// Increase the window size.
     ///
-    /// This is called after receiving a WINDOW_UPDATE frame
+    /// This is called after receiving a `WINDOW_UPDATE` frame
     pub fn inc_window(&mut self, sz: WindowSize) -> Result<(), Reason> {
         let (val, overflow) = self.window_size.0.overflowing_add(sz as i32);
 
@@ -135,7 +135,7 @@ impl FlowControl {
     /// Decrement the send-side window size.
     ///
     /// This is called after receiving a SETTINGS frame with a lower
-    /// INITIAL_WINDOW_SIZE value.
+    /// `INITIAL_WINDOW_SIZE` value.
     pub fn dec_send_window(&mut self, sz: WindowSize) -> Result<(), Reason> {
         tracing::trace!(
             "dec_window; sz={}; window={}, available={}",
@@ -151,7 +151,7 @@ impl FlowControl {
     /// Decrement the recv-side window size.
     ///
     /// This is called after receiving a SETTINGS ACK frame with a lower
-    /// INITIAL_WINDOW_SIZE value.
+    /// `INITIAL_WINDOW_SIZE` value.
     pub fn dec_recv_window(&mut self, sz: WindowSize) -> Result<(), Reason> {
         tracing::trace!(
             "dec_recv_window; sz={}; window={}, available={}",

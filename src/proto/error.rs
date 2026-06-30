@@ -89,7 +89,10 @@ impl From<io::ErrorKind> for Error {
 
 impl From<io::Error> for Error {
     fn from(src: io::Error) -> Self {
-        Error::Io(src.kind(), src.get_ref().map(|inner| inner.to_string()))
+        Error::Io(
+            src.kind(),
+            src.get_ref().map(std::string::ToString::to_string),
+        )
     }
 }
 

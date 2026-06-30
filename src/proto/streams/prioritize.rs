@@ -1,10 +1,13 @@
 use super::store::Resolve;
-use super::*;
+use super::{
+    frame, store, stream, Buf, Buffer, Codec, Config, Counts, FlowControl, Frame, Initiator, Store,
+    StreamId, WindowSize, MAX_WINDOW_SIZE,
+};
 
 use crate::frame::Reason;
 
 use crate::codec::UserError;
-use crate::codec::UserError::*;
+use crate::codec::UserError::{InactiveStreamId, UnexpectedFrameType};
 
 use bytes::buf::Take;
 use std::{
@@ -164,9 +167,8 @@ impl Prioritize {
         if !stream.state.is_send_streaming() {
             if stream.state.is_closed() {
                 return Err(InactiveStreamId);
-            } else {
-                return Err(UnexpectedFrameType);
             }
+            return Err(UnexpectedFrameType);
         }
 
         // Update the buffered data counter
@@ -363,7 +365,7 @@ impl Prioritize {
         while let Some(stream) = self.pending_capacity.pop(store) {
             counts.transition(stream, |_, stream| {
                 tracing::trace!(?stream.id, "clear_pending_capacity");
-            })
+            });
         }
     }
 
@@ -402,7 +404,7 @@ impl Prioritize {
                 // stream if there isn't enough connection level capacity to fulfill
                 // the capacity request.
                 self.try_assign_capacity(stream);
-            })
+            });
         }
     }
 
@@ -505,16 +507,15 @@ impl Prioritize {
         }
     }
 
-    pub fn poll_complete<T, B>(
+    pub fn poll_complete<B>(
         &mut self,
         cx: &mut Context,
         buffer: &mut Buffer<Frame<B>>,
         store: &mut Store,
         counts: &mut Counts,
-        dst: &mut Codec<T, Prioritized<B>>,
+        dst: &mut Codec<Prioritized<B>>,
     ) -> Poll<io::Result<()>>
     where
-        T: AsyncWrite + Unpin,
         B: Buf,
     {
         // Ensure codec is ready
@@ -534,34 +535,31 @@ impl Prioritize {
                 self.try_assign_capacity(&mut stream);
             }
 
-            match self.pop_frame(buffer, store, max_frame_len, counts) {
-                Some(frame) => {
-                    tracing::trace!(?frame, "writing");
+            if let Some(frame) = self.pop_frame(buffer, store, max_frame_len, counts) {
+                tracing::trace!(?frame, "writing");
 
-                    debug_assert_eq!(self.in_flight_data_frame, InFlightData::Nothing);
-                    if let Frame::Data(ref frame) = frame {
-                        self.in_flight_data_frame = InFlightData::DataFrame(frame.payload().stream);
-                    }
-                    dst.buffer(frame).expect("invalid frame");
-
-                    // Ensure the codec is ready to try the loop again.
-                    ready!(dst.poll_ready(cx))?;
-
-                    // Because, always try to reclaim...
-                    self.reclaim_frame(buffer, store, dst);
+                debug_assert_eq!(self.in_flight_data_frame, InFlightData::Nothing);
+                if let Frame::Data(ref frame) = frame {
+                    self.in_flight_data_frame = InFlightData::DataFrame(frame.payload().stream);
                 }
-                None => {
-                    // Try to flush the codec.
-                    ready!(dst.flush(cx))?;
+                dst.buffer(frame).expect("invalid frame");
 
-                    // This might release a data frame...
-                    if !self.reclaim_frame(buffer, store, dst) {
-                        return Poll::Ready(Ok(()));
-                    }
+                // Ensure the codec is ready to try the loop again.
+                ready!(dst.poll_ready(cx))?;
 
-                    // No need to poll ready as poll_complete() does this for
-                    // us...
+                // Because, always try to reclaim...
+                self.reclaim_frame(buffer, store, dst);
+            } else {
+                // Try to flush the codec.
+                ready!(dst.flush(cx))?;
+
+                // This might release a data frame...
+                if !self.reclaim_frame(buffer, store, dst) {
+                    return Poll::Ready(Ok(()));
                 }
+
+                // No need to poll ready as poll_complete() does this for
+                // us...
             }
         }
     }
@@ -573,11 +571,11 @@ impl Prioritize {
     /// When a data frame is written to the codec, it may not be written in its
     /// entirety (large chunks are split up into potentially many data frames).
     /// In this case, the stream needs to be reprioritized.
-    fn reclaim_frame<T, B>(
+    fn reclaim_frame<B>(
         &mut self,
         buffer: &mut Buffer<Frame<B>>,
         store: &mut Store,
-        dst: &mut Codec<T, Prioritized<B>>,
+        dst: &mut Codec<Prioritized<B>>,
     ) -> bool
     where
         B: Buf,
@@ -943,7 +941,7 @@ where
     }
 
     fn advance(&mut self, cnt: usize) {
-        self.inner.advance(cnt)
+        self.inner.advance(cnt);
     }
 }
 

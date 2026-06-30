@@ -94,7 +94,9 @@ impl<T> Frame<T> {
     where
         F: FnOnce(T) -> U,
     {
-        use self::Frame::*;
+        use self::Frame::{
+            Data, GoAway, Headers, Ping, Priority, PushPromise, Reset, Settings, WindowUpdate,
+        };
 
         match self {
             Data(frame) => frame.map(f).into(),
@@ -112,7 +114,9 @@ impl<T> Frame<T> {
 
 impl<T> fmt::Debug for Frame<T> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        use self::Frame::*;
+        use self::Frame::{
+            Data, GoAway, Headers, Ping, Priority, PushPromise, Reset, Settings, WindowUpdate,
+        };
 
         match *self {
             Data(ref frame) => fmt::Debug::fmt(frame, fmt),

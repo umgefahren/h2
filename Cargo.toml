@@ -17,7 +17,7 @@ keywords = ["http", "sans-io", "non-blocking"]
 categories = ["network-programming", "web-programming"]
 exclude = ["fixtures/**", "ci/**"]
 edition = "2021"
-rust-version = "1.63"
+rust-version = "1.65"
 
 [features]
 # Enables **unstable** APIs. Any API exposed by this feature has no backwards

@@ -59,13 +59,13 @@ buffers:
 
 ```rust
 use bytes::BytesMut;
-use h2::{client, server};
+use h2::client;
 use http::Request;
 
 let mut conn = client::handshake();
 
 let request = Request::get("https://example.com/").body(()).unwrap();
-let (stream_id, _body) = conn.send_request(request, true).unwrap();
+let (_stream_id, _body) = conn.send_request(request, true).unwrap();
 
 // Write what the connection wants to send to your transport...
 let mut out = BytesMut::new();
@@ -75,8 +75,16 @@ conn.poll_transmit(&mut out);
 // ...read bytes back and feed them in, then drain events.
 // conn.recv(&bytes)?;
 // while let Some(event) = conn.poll_event() { /* handle */ }
-# let _ = stream_id;
 ```
+
+On the server side, `server::handshake()` gives a `server::Connection` with the
+same `recv` / `poll_transmit` / `poll_event` loop; requests arrive as
+`server::Event::Request` and responses are sent with
+`Connection::send_response` / `send_data` / `send_trailers`.
+
+## Minimum supported Rust version
+
+The current MSRV is **1.65**.
 
 ## FAQ
 

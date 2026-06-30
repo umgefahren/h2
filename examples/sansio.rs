@@ -8,7 +8,7 @@
 //! Run with: `cargo run --example sansio`
 
 use bytes::{Bytes, BytesMut};
-use h2::{client, server};
+use h2_zero::{client, server};
 use http::{Request, Response};
 
 /// Move all pending outbound bytes from one endpoint into the other.

@@ -22,7 +22,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! h2 = "0.4"
+//! h2-zero = "0.4"
 //! ```
 //!
 //! # Layout
@@ -30,7 +30,7 @@
 //! The crate is split into [`client`] and [`server`] modules. Types that are
 //! common to both clients and servers are located at the root of the crate.
 //!
-//! See module level documentation for more details on how to use `h2`.
+//! See module level documentation for more details on how to use `h2-zero`.
 //!
 //! # Handshake
 //!

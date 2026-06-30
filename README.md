@@ -1,14 +1,14 @@
-# H2
+# h2-zero
 
 A **sans-I/O** HTTP/2 client & server implementation for Rust.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Crates.io](https://img.shields.io/crates/v/h2.svg)](https://crates.io/crates/h2)
-[![Documentation](https://docs.rs/h2/badge.svg)][dox]
+[![Crates.io](https://img.shields.io/crates/v/h2-zero.svg)](https://crates.io/crates/h2-zero)
+[![Documentation](https://docs.rs/h2-zero/badge.svg)][dox]
 
 More information about this crate can be found in the [crate documentation][dox].
 
-[dox]: https://docs.rs/h2
+[dox]: https://docs.rs/h2-zero
 
 ## Features
 
@@ -45,11 +45,11 @@ specification. It does not handle:
 
 ## Usage
 
-To use `h2`, first add this to your `Cargo.toml`:
+To use `h2-zero`, first add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-h2 = "0.4"
+h2-zero = "0.4"
 ```
 
 Then drive a connection over whatever transport you like. See
@@ -59,7 +59,7 @@ buffers:
 
 ```rust
 use bytes::BytesMut;
-use h2::client;
+use h2_zero::client;
 use http::Request;
 
 let mut conn = client::handshake();

@@ -20,11 +20,11 @@
 //! [`SendStream`] used to stream the request body.
 //!
 //! ```
-//! use h2::client;
+//! use h2_zero::client;
 //! use http::Request;
 //! use bytes::BytesMut;
 //!
-//! # fn doc() -> Result<(), h2::Error> {
+//! # fn doc() -> Result<(), h2_zero::Error> {
 //! let mut conn = client::handshake();
 //!
 //! let request = Request::get("https://example.com/").body(()).unwrap();

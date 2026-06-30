@@ -4,7 +4,7 @@
 //! exercising the `recv` / `poll_transmit` / `poll_event` API with no real I/O.
 
 use bytes::{Bytes, BytesMut};
-use h2::{client, server};
+use h2_zero::{client, server};
 use http::{HeaderMap, Request, Response};
 
 /// Pump all currently-available bytes from `from` into `to`, returning the
@@ -257,7 +257,7 @@ fn server_resets_stream() {
     let server_stream = server_stream.unwrap();
 
     // Server refuses the request.
-    server.reset_stream(server_stream, h2::Reason::REFUSED_STREAM);
+    server.reset_stream(server_stream, h2_zero::Reason::REFUSED_STREAM);
     settle(&mut client, &mut server);
 
     let mut reset_reason = None;
@@ -266,7 +266,7 @@ fn server_resets_stream() {
             reset_reason = Some(reason);
         }
     }
-    assert_eq!(reset_reason, Some(h2::Reason::REFUSED_STREAM));
+    assert_eq!(reset_reason, Some(h2_zero::Reason::REFUSED_STREAM));
 }
 
 #[test]
